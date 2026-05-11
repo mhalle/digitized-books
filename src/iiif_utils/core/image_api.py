@@ -4,7 +4,13 @@ Format: {service}/{region}/{size}/{rotation}/{quality}.{format}
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any, Mapping
+
+# info.json placeholder sentinel: NLM and our LoC synthesizer set
+# canvas width/height to this when the real value isn't known.
+_PLACEHOLDER_DIM = 99999
 
 
 def clamp_dims_from_page_row(
@@ -24,6 +30,62 @@ def clamp_dims_from_page_row(
         return iw, ih
     return row["width"] if "width" in row.keys() else None, \
            row["height"] if "height" in row.keys() else None
+
+
+def fetch_info_json(service_url: str, *, cfg_http: dict[str, Any],
+                     cache_dir: Path | None = None) -> dict[str, Any]:
+    """Fetch and cache the IIIF Image API `info.json` for a service.
+
+    `service_url` is the base of the image service (no trailing slash),
+    e.g. `https://iiif.wellcomecollection.org/image/b21212600_0199.jp2`.
+    Cached under `cache_dir/info_json/` keyed by a hash of the URL.
+    """
+    # Lazy import to keep core.image_api a low-dep module.
+    from iiif_utils.core import http as http_
+    url = service_url.rstrip("/") + "/info.json"
+    info_dir = (cache_dir / "info_json") if cache_dir else None
+    if info_dir is not None:
+        info_dir.mkdir(parents=True, exist_ok=True)
+    body = http_.fetch_bytes(url, cfg_http=cfg_http,
+                              cache_dir=info_dir, suffix=".json")
+    return json.loads(body)  # type: ignore[no-any-return]
+
+
+def dims_from_info(info: dict[str, Any]) -> tuple[int | None, int | None]:
+    """Extract (width, height) from a parsed info.json dict."""
+    w = info.get("width")
+    h = info.get("height")
+    try:
+        return (int(w) if w is not None else None,
+                int(h) if h is not None else None)
+    except (TypeError, ValueError):
+        return None, None
+
+
+def resolve_dims(row: Mapping[str, Any], *,
+                  cfg_http: dict[str, Any] | None = None,
+                  cache_dir: Path | None = None) -> tuple[int | None, int | None]:
+    """Return image-native (width, height) for a `page_numbers` row,
+    falling back to the IIIF Image API's `info.json` when the row's
+    stored dims are missing or placeholder.
+
+    Cache hits make repeated calls cheap; first call per canvas is one
+    extra HTTP request.
+    """
+    cw, ch = clamp_dims_from_page_row(row)
+    # Anything plausible? Use it.
+    if (cw and ch
+            and cw != _PLACEHOLDER_DIM and ch != _PLACEHOLDER_DIM):
+        return cw, ch
+    svc = row.get("image_service_url") if hasattr(row, "get") else None
+    if not svc or cfg_http is None:
+        return cw, ch
+    try:
+        info = fetch_info_json(svc, cfg_http=cfg_http, cache_dir=cache_dir)
+    except Exception:
+        return cw, ch
+    iw, ih = dims_from_info(info)
+    return iw or cw, ih or ch
 
 
 def region_url(

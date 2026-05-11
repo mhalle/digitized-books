@@ -60,7 +60,10 @@ def get_region(index: Path, leaf_num: int | None, book: str | None,
         )
 
     if padding:
-        cw, ch = image_api.clamp_dims_from_page_row(row)
+        cache_dir = Path(cfg.get("http", {}).get(
+            "cache_dir", "./.iiif-cache")).expanduser()
+        cw, ch = image_api.resolve_dims(row, cfg_http=cfg.get("http", {}),
+                                          cache_dir=cache_dir)
         bbox = image_api.padded_bbox(bbox, padding,  # type: ignore[arg-type]
                                        canvas_w=cw, canvas_h=ch)
     url = image_api.region_url(row["image_service_url"],

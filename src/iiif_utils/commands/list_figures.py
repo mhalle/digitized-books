@@ -7,6 +7,7 @@ from typing import Any
 
 import click
 
+from iiif_utils.config import load_config
 from iiif_utils.core import image_api
 from iiif_utils.utils import output as output_
 
@@ -55,10 +56,15 @@ def list_figures(index: Path, leaf_num: int | None, all_pages: bool,
         return
 
     out_rows: list[dict[str, Any]] = []
+    cfg = load_config() if padding else None
+    cfg_http = cfg.get("http", {}) if cfg else {}
+    cache_dir = (Path(cfg_http.get("cache_dir", "./.iiif-cache")).expanduser()
+                  if padding else None)
     for r in db_rows:
         bbox = (r["bbox_x0"], r["bbox_y0"], r["bbox_x1"], r["bbox_y1"])
         if padding:
-            cw, ch = image_api.clamp_dims_from_page_row(r)
+            cw, ch = image_api.resolve_dims(r, cfg_http=cfg_http,
+                                              cache_dir=cache_dir)
             bbox = image_api.padded_bbox(bbox, padding,
                                           canvas_w=cw, canvas_h=ch)
         url = (image_api.region_url(r["image_service_url"], bbox, size=size)

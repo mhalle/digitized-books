@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 import click
 
@@ -82,7 +83,19 @@ def get_url(index: Path, leaf_num: int | None, ill_num: int | None,
             f"Canvas {leaf_num} has no image_service_url."
         )
     service = pn["image_service_url"]
-    clamp_w, clamp_h = image_api.clamp_dims_from_page_row(pn)
+    # Only fetch info.json when --padding will need it (cheap if not).
+    cache_dir = None
+    cfg_http: dict[str, Any] = {}
+    if padding:
+        from iiif_utils.config import load_config
+        cfg = load_config()
+        cfg_http = cfg.get("http", {})
+        cache_dir = Path(cfg_http.get(
+            "cache_dir", "./.iiif-cache")).expanduser()
+        clamp_w, clamp_h = image_api.resolve_dims(
+            pn, cfg_http=cfg_http, cache_dir=cache_dir)
+    else:
+        clamp_w, clamp_h = image_api.clamp_dims_from_page_row(pn)
 
     if mode == "info":
         click.echo(image_api.info_json_url(service))

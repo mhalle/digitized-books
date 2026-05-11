@@ -20,10 +20,36 @@ def test_cli_help_lists_commands():
     assert r.exit_code == 0
     for cmd in ("info", "list-files", "create-index", "rebuild-index",
                  "search-catalog", "search-cat", "search-index",
-                 "get-page", "get-pages", "get-pdf",
+                 "get-info", "get-page", "get-pages", "get-pdf",
                  "get-figure", "get-region", "get-text", "get-url",
                  "list-figures", "ocr-page"):
         assert cmd in r.output
+
+
+def test_dims_from_info():
+    from iiif_utils.core.image_api import dims_from_info
+    assert dims_from_info({"width": 1820, "height": 2938}) == (1820, 2938)
+    assert dims_from_info({"width": "1820", "height": "2938"}) == (1820, 2938)
+    assert dims_from_info({}) == (None, None)
+    assert dims_from_info({"width": "garbage"}) == (None, None)
+
+
+def test_resolve_dims_uses_stored_when_valid():
+    from iiif_utils.core.image_api import resolve_dims
+    row = {"image_width": 1820, "image_height": 2938,
+           "width": 1731, "height": 2903,
+           "image_service_url": "https://example.org/svc/x"}
+    # No HTTP needed when stored dims are valid.
+    assert resolve_dims(row) == (1820, 2938)
+
+
+def test_resolve_dims_falls_through_to_placeholder_without_http():
+    from iiif_utils.core.image_api import resolve_dims
+    # LoC case: placeholder 99999, no cfg_http → return placeholder.
+    row = {"image_width": None, "image_height": None,
+           "width": 99999, "height": 99999,
+           "image_service_url": "https://example.org/svc/x"}
+    assert resolve_dims(row) == (99999, 99999)
 
 
 def test_create_mosaic_tiny():

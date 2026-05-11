@@ -70,7 +70,9 @@ def get_figure(index: Path, leaf_num: int | None, book: str | None,
 
     bbox = (row["bbox_x0"], row["bbox_y0"], row["bbox_x1"], row["bbox_y1"])
     if padding:
-        cw, ch = image_api.clamp_dims_from_page_row(row)
+        cache_dir = Path(cfg_http.get("cache_dir", "./.iiif-cache")).expanduser()
+        cw, ch = image_api.resolve_dims(row, cfg_http=cfg_http,
+                                          cache_dir=cache_dir)
         bbox = image_api.padded_bbox(bbox, padding, canvas_w=cw, canvas_h=ch)
     url = image_api.region_url(row["image_service_url"], bbox,
                                  size=size, fmt=fmt)
