@@ -1,0 +1,20 @@
+default_provider = "generic"
+
+[providers.generic]
+type = "iiif_generic"
+ocr_preference = ["alto", "rendering_text", "content_search"]
+
+[providers.wellcome]
+type = "wellcome"
+catalogue_api = "https://api.wellcomecollection.org/catalogue/v2"
+iiif_base = "https://iiif.wellcomecollection.org"
+ocr_preference = ["alto", "rendering_text", "content_search"]
+
+[http]
+user_agent = "iiif-utils/0.1"
+timeout_seconds = 60
+max_concurrency = 8
+cache_dir = "./.iiif-cache"
+
+[output]
+default_format = "table"

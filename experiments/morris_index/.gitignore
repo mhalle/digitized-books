@@ -1,0 +1,4 @@
+data/
+morris.sqlite
+.venv/
+__pycache__/

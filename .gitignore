@@ -1,0 +1,25 @@
+# local Claude tooling state
+.claude/
+
+# build artifacts
+dist/
+build/
+*.egg-info/
+src/iiif_utils/_version.py
+
+# venvs / caches
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# project-local caches (per design §4.3)
+.iiif-cache/
+
+# experiments (each has its own .gitignore for data/results)
+
+# generated indexes (don't accidentally commit user data)
+*.sqlite
+*.sqlite-journal
