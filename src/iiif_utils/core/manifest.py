@@ -124,14 +124,20 @@ def _image_service_v2(canvas: dict[str, Any]) -> tuple[str | None, str | None, s
 
 
 def _alto_seealso(canvas: dict[str, Any]) -> str | None:
-    """Return canvas-level seeAlso URL with format=text/xml and profile ~alto."""
-    for s in canvas.get("seeAlso", []):
+    """Return canvas-level seeAlso URL with format=text/xml and profile ~alto.
+
+    Defensive against v2 manifests that allow bare-string seeAlso entries.
+    """
+    for s in canvas.get("seeAlso", []) or []:
+        if not isinstance(s, dict):
+            continue
         fmt = (s.get("format") or "").lower()
         prof_raw = s.get("profile") or ""
         prof = " ".join(prof_raw) if isinstance(prof_raw, list) else str(prof_raw)
         prof = prof.lower()
         if fmt in ("text/xml", "application/xml") and "alto" in prof:
-            return s.get("id") or s.get("@id")  # type: ignore[no-any-return]
+            url = s.get("id") or s.get("@id")
+            return str(url) if url else None
     return None
 
 
@@ -164,9 +170,18 @@ def canvases(manifest: dict[str, Any]) -> list[Canvas]:
 
 
 def renderings(manifest: dict[str, Any]) -> list[Rendering]:
-    """Manifest-level rendering entries (PDF, plain text, EPUB, …)."""
+    """Manifest-level rendering entries (PDF, plain text, EPUB, …).
+
+    IIIF v2 allowed either an object or a bare URL string here; v3
+    standardized on objects. We accept either.
+    """
     out: list[Rendering] = []
-    for r in manifest.get("rendering", []):
+    for r in manifest.get("rendering", []) or []:
+        if isinstance(r, str):
+            out.append(Rendering(url=r, format=None, label=None))
+            continue
+        if not isinstance(r, dict):
+            continue
         url = r.get("id") or r.get("@id")
         if not url:
             continue
