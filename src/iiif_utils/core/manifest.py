@@ -24,6 +24,8 @@ class Canvas:
                               # (used as fallback when ALTO is absent;
                               # e.g. LoC items that have per-page .txt but
                               # no per-page ALTO)
+    hocr_url: str | None     # canvas-level hOCR seeAlso, if any
+                              # (used by MDZ — they emit hOCR not ALTO)
 
 
 @dataclass(frozen=True)
@@ -170,6 +172,23 @@ def _text_seealso(canvas: dict[str, Any]) -> str | None:
     return None
 
 
+def _hocr_seealso(canvas: dict[str, Any]) -> str | None:
+    """Return canvas-level seeAlso URL pointing at hOCR, if any.
+
+    Match on format `text/vnd.hocr+html` (preferred) or on a profile
+    containing `hocr`.
+    """
+    for s in _seealso_entries(canvas):
+        fmt = (s.get("format") or "").lower()
+        prof_raw = s.get("profile") or ""
+        prof = " ".join(prof_raw) if isinstance(prof_raw, list) else str(prof_raw)
+        prof = prof.lower()
+        if fmt == "text/vnd.hocr+html" or "hocr" in prof:
+            url = s.get("id") or s.get("@id")
+            return str(url) if url else None
+    return None
+
+
 def canvases(manifest: dict[str, Any]) -> list[Canvas]:
     """Return one Canvas per item in the manifest's sequence."""
     version = presentation_version(manifest)
@@ -195,6 +214,7 @@ def canvases(manifest: dict[str, Any]) -> list[Canvas]:
             height=c.get("height"),
             alto_url=_alto_seealso(c),
             text_url=_text_seealso(c),
+            hocr_url=_hocr_seealso(c),
         ))
     return out
 

@@ -89,6 +89,72 @@ def test_seealso_polymorphism():
     assert _alto_seealso({}) is None
 
 
+def test_mdz_bsb_recognizer():
+    from iiif_utils.providers.mdz import looks_like_bsb, parse_ref
+    assert looks_like_bsb("bsb00056329")
+    assert looks_like_bsb("bsb1234567890")
+    assert not looks_like_bsb("b22396147")    # Wellcome
+    assert not looks_like_bsb("kdckv24y")     # Wellcome work-id
+    assert not looks_like_bsb("49043519")     # LoC
+    assert parse_ref("bsb00056329") == "bsb00056329"
+    assert parse_ref(
+        "https://api.digitale-sammlungen.de/iiif/presentation/v2/"
+        "bsb00056329/manifest"
+    ) == "bsb00056329"
+    assert parse_ref(
+        "https://api.digitale-sammlungen.de/iiif/presentation/v2/"
+        "bsb11107655_0001/manifest"
+    ) == "bsb11107655"
+
+
+def test_mdz_inject_hocr_urls():
+    from iiif_utils.providers.mdz import inject_hocr_urls
+    m = {"sequences": [{"canvases": [
+        {"@id": "x/canvas/1"},  # no existing seeAlso
+        {"@id": "x/canvas/2", "seeAlso": {"@id": "y", "format": "x/y"}},
+        {"@id": "x/canvas/3", "seeAlso": [{"@id": "z", "format": "a/b"}]},
+    ]}]}
+    inject_hocr_urls(m, "bsb00056329")
+    cs = m["sequences"][0]["canvases"]
+    # All three should now have a list-typed seeAlso with a hOCR entry
+    for i, c in enumerate(cs, start=1):
+        sa = c["seeAlso"]
+        assert isinstance(sa, list)
+        hocr_entries = [s for s in sa
+                         if s.get("format") == "text/vnd.hocr+html"]
+        assert len(hocr_entries) == 1
+        assert hocr_entries[0]["@id"] == (
+            f"https://api.digitale-sammlungen.de/ocr/bsb00056329/{i}")
+    # Existing entries preserved on canvases 2 + 3
+    assert any(s.get("format") == "x/y" for s in cs[1]["seeAlso"])
+    assert any(s.get("format") == "a/b" for s in cs[2]["seeAlso"])
+
+
+def test_hocr_parser_minimal():
+    from iiif_utils.core.hocr import parse_hocr_bytes
+    sample = b"""<html><body>
+    <div class="ocr_page" title="image x.jp2; bbox 0 0 1000 1500">
+      <div class="ocrx_block" title="bbox 10 20 110 60">
+        <p class="ocr_par" title="bbox 10 20 110 60">
+          <span class="ocr_line" title="bbox 10 20 110 60">
+            <span class="ocrx_word" title="bbox 10 20 50 60; x_wconf 95">hello</span>
+            <span class="ocrx_word" title="bbox 55 20 110 60; x_wconf 87">world</span>
+          </span>
+        </p>
+      </div>
+    </div></body></html>"""
+    page = parse_hocr_bytes(sample)
+    assert page.page_w == 1000
+    assert page.page_h == 1500
+    assert len(page.text_blocks) == 1
+    b = page.text_blocks[0]
+    assert b.text == "hello world"
+    assert (b.bbox_x0, b.bbox_y0, b.bbox_x1, b.bbox_y1) == (10, 20, 110, 60)
+    assert b.line_count == 1
+    assert b.word_count == 2
+    assert page.illustrations == []  # hOCR has no Illustration analog
+
+
 def test_loc_lccn_recognizer():
     from iiif_utils.providers.loc import looks_like_lccn, parse_ref
     assert looks_like_lccn("49043519")

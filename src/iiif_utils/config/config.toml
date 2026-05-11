@@ -20,6 +20,14 @@ ocr_preference = ["alto", "text_rendering"]
 # LoC rate-limits aggressively (429 at ~8 concurrent). Be polite.
 max_concurrency = 2
 
+[providers.mdz]
+type = "mdz"
+iiif_base = "https://api.digitale-sammlungen.de"
+# MDZ has IIIF v2 manifests but per-canvas hOCR is at /ocr/{bsb}/{N},
+# not in the manifest seeAlso. Adapter fetches the manifest and
+# injects hOCR URLs as canvas seeAlso entries.
+ocr_preference = ["hocr"]
+
 [http]
 user_agent = "iiif-utils/0.1"
 timeout_seconds = 60

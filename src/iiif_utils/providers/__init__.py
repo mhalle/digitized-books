@@ -47,6 +47,10 @@ def resolve(ref: str, *, cfg: dict[str, Any], explicit_provider: str | None = No
     if provider_key == "loc":
         return _resolve_loc(ref, cfg=cfg, cfg_http=cfg_http, cache_dir=cache_dir)
 
+    # MDZ has manifests but no in-manifest OCR URLs — we fetch and inject.
+    if provider_key == "mdz":
+        return _resolve_mdz(ref, cfg=cfg, cfg_http=cfg_http, cache_dir=cache_dir)
+
     if ref.startswith(("http://", "https://")):
         return ManifestRef(
             manifest_url=ref,
@@ -69,6 +73,9 @@ def _guess_provider(ref: str, cfg: dict[str, Any]) -> str:
         # LoC item URLs need the loc provider (synthesizes the manifest)
         if host and host.endswith("loc.gov") and "/item/" in ref:
             return "loc"
+        # MDZ manifest URLs need the mdz provider (injects hOCR seeAlso)
+        if host and host.endswith("digitale-sammlungen.de"):
+            return "mdz"
         # Hostname → provider key, if any configured provider declares an iiif_base
         for key, p in (cfg.get("providers") or {}).items():
             base = p.get("iiif_base")
@@ -77,6 +84,10 @@ def _guess_provider(ref: str, cfg: dict[str, Any]) -> str:
         return str(cfg.get("default_provider", "generic"))
     if B_NUMBER_RE.match(ref):
         return "wellcome"
+    # BSB IDs (MDZ): 'bsb' + 8-10 digits.
+    from iiif_utils.providers import mdz as mdz_mod  # lazy: avoid cycle
+    if mdz_mod.looks_like_bsb(ref):
+        return "mdz"
     # LoC LCCN: pure-digit (8-10) or letter-prefixed digit string.
     # Check before the Wellcome work-id heuristic since pure-digit
     # strings like '49043519' look like work-ids too.
@@ -88,6 +99,28 @@ def _guess_provider(ref: str, cfg: dict[str, Any]) -> str:
     if re.match(r"^[a-z0-9]{8}$", ref) and re.search(r"[a-z]", ref):
         return "wellcome"
     return str(cfg.get("default_provider", "generic"))
+
+
+def _resolve_mdz(ref: str, *, cfg: dict[str, Any], cfg_http: dict[str, Any],
+                  cache_dir: Any) -> ManifestRef:
+    from iiif_utils.providers import mdz as mdz_mod
+    bsb = mdz_mod.parse_ref(ref)
+    if not bsb:
+        raise ValueError(
+            f"Cannot extract MDZ BSB id from {ref!r} — pass a BSB id like "
+            f"'bsb00056329' or a manifest URL like "
+            f"'https://api.digitale-sammlungen.de/iiif/presentation/v2/"
+            f"bsb00056329/manifest'."
+        )
+    manifest = mdz_mod.fetch_and_augment(bsb, cfg_http=cfg_http,
+                                          cache_dir=cache_dir)
+    extra = mdz_mod.extra_metadata_for(manifest, bsb)
+    return ManifestRef(
+        manifest_url=mdz_mod.manifest_url_for(bsb),
+        provider_key="mdz",
+        extra_metadata=extra,
+        manifest_payload=manifest,
+    )
 
 
 def _resolve_loc(ref: str, *, cfg: dict[str, Any], cfg_http: dict[str, Any],

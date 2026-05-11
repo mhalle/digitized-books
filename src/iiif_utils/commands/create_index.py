@@ -143,8 +143,12 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
     il_rows: list[dict[str, Any]] = []
     image_dims: dict[int, tuple[int, int]] = {}
     n_alto_canvases = sum(1 for c in canvases if c.alto_url)
+    n_hocr_canvases = sum(
+        1 for c in canvases if not c.alto_url and c.hocr_url
+    )
     n_text_canvases = sum(
-        1 for c in canvases if not c.alto_url and c.text_url
+        1 for c in canvases
+        if not c.alto_url and not c.hocr_url and c.text_url
     )
     if canvases:
         tb_rows, il_rows, image_dims = _parse_altos(
@@ -153,14 +157,15 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
 
     # --- index_metadata (after parse so we know the OCR provenance) --------
     from iiif_utils import __version__
-    if n_alto_canvases > 0 and n_text_canvases > 0:
-        ocr_source = "mixed"   # both ALTO and text fallback used
-    elif n_alto_canvases > 0:
-        ocr_source = "alto"
-    elif n_text_canvases > 0:
-        ocr_source = "text_plain"
-    else:
+    have = [k for k, v in (("alto", n_alto_canvases),
+                             ("hocr", n_hocr_canvases),
+                             ("text_plain", n_text_canvases)) if v]
+    if not have:
         ocr_source = "none"
+    elif len(have) == 1:
+        ocr_source = have[0]
+    else:
+        ocr_source = "mixed"
     idx_md = {
         "slug": slug,
         "created_at": db_mod.now_iso(),
@@ -268,32 +273,70 @@ def _parse_altos(canvases: list[Any], *, cfg_http: dict[str, Any],
                              dict[int, tuple[int, int]]]:
     """Fetch + parse per-canvas OCR.
 
-    Returns (text_blocks rows, illustrations rows, {canvas_index:
-    (image_width, image_height)}).
+    Three sources, in priority order:
+      1. ALTO seeAlso (Wellcome, LoC modern items): full bbox + illustrations
+      2. hOCR seeAlso (MDZ via injected URLs): full bbox, no illustrations
+      3. plain-text seeAlso (LoC older items): synthetic block, no bboxes
 
-    For canvases with ALTO seeAlso: full bbox/illustration parsing.
-    For canvases with only plain-text seeAlso (LoC's per-page .txt):
-    one synthetic block per canvas, no bboxes, no illustrations.
-    `image_width`/`image_height` come from ALTO `<Page>` and are NULL
-    for plain-text-only canvases.
+    `image_width`/`image_height` are populated only for ALTO and hOCR
+    (where the page element carries dims); NULL for plain-text-only.
     """
     image_dims: dict[int, tuple[int, int]] = {}
     tb_rows: list[dict[str, Any]] = []
     il_rows: list[dict[str, Any]] = []
 
     alto_dir = cache_dir / "alto"
+    hocr_dir = cache_dir / "hocr"
     text_dir = cache_dir / "text"
     alto_dir.mkdir(parents=True, exist_ok=True)
 
     alto_canvases = [c for c in canvases if c.alto_url]
+    hocr_only_canvases = [
+        c for c in canvases if not c.alto_url and c.hocr_url
+    ]
     text_only_canvases = [
-        c for c in canvases if not c.alto_url and c.text_url
+        c for c in canvases
+        if not c.alto_url and not c.hocr_url and c.text_url
     ]
     log.info(f"fetching {len(alto_canvases)} ALTO + "
+             f"{len(hocr_only_canvases)} hOCR + "
              f"{len(text_only_canvases)} text-only files "
              f"(of {len(canvases)} canvases)")
-    if not alto_canvases and not text_only_canvases:
+    if (not alto_canvases and not hocr_only_canvases
+            and not text_only_canvases):
         return tb_rows, il_rows, image_dims
+
+    def _ingest_xml_blocks(c: Any, page: Any, kind: str) -> None:
+        if page.page_w and page.page_h:
+            image_dims[c.index] = (page.page_w, page.page_h)
+        for b in page.text_blocks:
+            tb_rows.append({
+                "page_id": c.index,
+                "block_number": b.block_number,
+                "block_type": ("ocr_textblock" if kind == "alto"
+                                else "ocrx_block"),
+                "language": None,
+                "text_direction": None,
+                "bbox_x0": b.bbox_x0, "bbox_y0": b.bbox_y0,
+                "bbox_x1": b.bbox_x1, "bbox_y1": b.bbox_y1,
+                "text": b.text,
+                "line_count": b.line_count,
+                "word_count": b.word_count,
+                "length": b.length,
+                "avg_confidence": None,
+                "avg_font_size": None,
+                "parent_carea_id": None,
+                "alto_id": b.alto_id,
+            })
+        for ill in page.illustrations:
+            il_rows.append({
+                "page_id": c.index,
+                "illustration_number": ill.illustration_number,
+                "bbox_x0": ill.bbox_x0, "bbox_y0": ill.bbox_y0,
+                "bbox_x1": ill.bbox_x1, "bbox_y1": ill.bbox_y1,
+                "illustration_type": ill.illustration_type,
+                "alto_id": ill.alto_id,
+            })
 
     # --- ALTO branch -------------------------------------------------------
     if alto_canvases:
@@ -313,36 +356,31 @@ def _parse_altos(canvases: list[Any], *, cfg_http: dict[str, Any],
                 log.warn(f"parse error canvas {c.index}: {e}")
                 continue
             n_parsed += 1
-            if page.page_w and page.page_h:
-                image_dims[c.index] = (page.page_w, page.page_h)
-            for b in page.text_blocks:
-                tb_rows.append({
-                    "page_id": c.index,
-                    "block_number": b.block_number,
-                    "block_type": "ocr_textblock",
-                    "language": None,
-                    "text_direction": None,
-                    "bbox_x0": b.bbox_x0, "bbox_y0": b.bbox_y0,
-                    "bbox_x1": b.bbox_x1, "bbox_y1": b.bbox_y1,
-                    "text": b.text,
-                    "line_count": b.line_count,
-                    "word_count": b.word_count,
-                    "length": b.length,
-                    "avg_confidence": None,
-                    "avg_font_size": None,
-                    "parent_carea_id": None,
-                    "alto_id": b.alto_id,
-                })
-            for ill in page.illustrations:
-                il_rows.append({
-                    "page_id": c.index,
-                    "illustration_number": ill.illustration_number,
-                    "bbox_x0": ill.bbox_x0, "bbox_y0": ill.bbox_y0,
-                    "bbox_x1": ill.bbox_x1, "bbox_y1": ill.bbox_y1,
-                    "illustration_type": ill.illustration_type,
-                    "alto_id": ill.alto_id,
-                })
+            _ingest_xml_blocks(c, page, "alto")
         log.info(f"parsed {n_parsed} ALTOs")
+
+    # --- hOCR branch -------------------------------------------------------
+    if hocr_only_canvases:
+        from iiif_utils.core import hocr as hocr_mod
+        hocr_dir.mkdir(parents=True, exist_ok=True)
+        urls = [c.hocr_url for c in hocr_only_canvases]
+        fetched_h = asyncio.run(http_.fetch_many_bytes(
+            urls, cfg_http=cfg_http, cache_dir=hocr_dir, suffix=".hocr",
+        ))
+        n_hocr = 0
+        for c in hocr_only_canvases:
+            content = fetched_h.get(c.hocr_url)
+            if not content:
+                log.warn(f"no hOCR bytes for canvas {c.index}")
+                continue
+            try:
+                page = hocr_mod.parse_hocr_bytes(content)
+            except Exception as e:
+                log.warn(f"hOCR parse error canvas {c.index}: {e}")
+                continue
+            n_hocr += 1
+            _ingest_xml_blocks(c, page, "hocr")
+        log.info(f"parsed {n_hocr} hOCRs")
 
     # --- Plain-text fallback branch ----------------------------------------
     if text_only_canvases:
