@@ -7,12 +7,15 @@ from iiif_utils import __version__
 from iiif_utils.commands.create_index import create_index
 from iiif_utils.commands.get_figure import get_figure
 from iiif_utils.commands.get_page import get_page
+from iiif_utils.commands.get_pages import get_pages
+from iiif_utils.commands.get_pdf import get_pdf
 from iiif_utils.commands.get_region import get_region
 from iiif_utils.commands.get_text import get_text
 from iiif_utils.commands.get_url import get_url
 from iiif_utils.commands.info import info
 from iiif_utils.commands.list_figures import list_figures
 from iiif_utils.commands.list_files import list_files
+from iiif_utils.commands.rebuild_index import rebuild_index
 from iiif_utils.commands.search_index import search_index
 
 
@@ -37,8 +40,11 @@ def cli(ctx: click.Context, verbose: bool) -> None:
 cli.add_command(info)
 cli.add_command(list_files)
 cli.add_command(create_index)
+cli.add_command(rebuild_index)
 cli.add_command(search_index)
 cli.add_command(get_page)
+cli.add_command(get_pages)
+cli.add_command(get_pdf)
 cli.add_command(get_figure)
 cli.add_command(get_region)
 cli.add_command(get_text)

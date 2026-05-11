@@ -17,9 +17,10 @@ def test_cli_version_runs():
 def test_cli_help_lists_commands():
     r = CliRunner().invoke(cli, ["--help"])
     assert r.exit_code == 0
-    for cmd in ("info", "list-files", "create-index", "search-index",
-                 "get-page", "get-figure", "get-region", "get-text",
-                 "get-url", "list-figures"):
+    for cmd in ("info", "list-files", "create-index", "rebuild-index",
+                 "search-index", "get-page", "get-pages", "get-pdf",
+                 "get-figure", "get-region", "get-text", "get-url",
+                 "list-figures"):
         assert cmd in r.output
 
 
@@ -83,6 +84,16 @@ MINIMAL_ALTO = b"""<?xml version='1.0'?>
     </Page>
   </Layout>
 </alto>"""
+
+
+def test_parse_leaf_range():
+    from iiif_utils.commands.get_pages import _parse_leaf_range
+    assert _parse_leaf_range("3", 10) == [3]
+    assert _parse_leaf_range("1-5", 10) == [1, 2, 3, 4, 5]
+    assert _parse_leaf_range("1-5,10", 10) == [1, 2, 3, 4, 5, 10]
+    assert _parse_leaf_range("1-3,2-4", 10) == [1, 2, 3, 4]  # union, sorted
+    assert _parse_leaf_range("8-12", 10) == [8, 9, 10]  # clamp to max
+    assert _parse_leaf_range("", 10) == []
 
 
 def test_health_partial_digitization_label():
