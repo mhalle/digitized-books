@@ -25,6 +25,26 @@ def test_cli_help_lists_commands():
         assert cmd in r.output
 
 
+def test_create_mosaic_tiny():
+    """Build a 2x1 mosaic from synthetic JPEG bytes."""
+    import io as _io
+    from PIL import Image as _Image
+    from iiif_utils.core.mosaic import create_mosaic
+
+    def jpg(color):
+        b = _io.BytesIO()
+        _Image.new("RGB", (100, 150), color).save(b, format="JPEG")
+        return b.getvalue()
+
+    out = create_mosaic([jpg("red"), jpg("blue")],
+                        labels=["A", "B"], width=200, cols=2, grid=True)
+    # Round-trip: it's a JPEG we can open and the size lines up with
+    # 2 cols × 100 px tiles → 200 wide × 150 tall.
+    im = _Image.open(_io.BytesIO(out))
+    assert im.format == "JPEG"
+    assert im.size == (200, 150)
+
+
 def test_ocr_page_bbox_parser():
     """Multi-format bbox parsing from ia-utils."""
     from iiif_utils.commands.ocr_page import _parse_bbox
