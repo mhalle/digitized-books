@@ -21,8 +21,17 @@ def test_cli_help_lists_commands():
                  "search-catalog", "search-cat", "search-index",
                  "get-page", "get-pages", "get-pdf",
                  "get-figure", "get-region", "get-text", "get-url",
-                 "list-figures"):
+                 "list-figures", "ocr-page"):
         assert cmd in r.output
+
+
+def test_ocr_page_bbox_parser():
+    """Multi-format bbox parsing from ia-utils."""
+    from iiif_utils.commands.ocr_page import _parse_bbox
+    assert _parse_bbox("10,20,30,40") == (10, 20, 30, 40)
+    assert _parse_bbox("10 20 30 40") == (10, 20, 30, 40)
+    assert _parse_bbox("bbox 10 20 30 40") == (10, 20, 30, 40)
+    assert _parse_bbox(" 10 , 20 , 30 , 40 ") == (10, 20, 30, 40)
 
 
 def test_search_catalog_alias_works():

@@ -15,6 +15,7 @@ dependencies = [
     "sqlite-utils>=3.35",
     "lxml>=4.9",
     "pillow>=10.0",
+    "pytesseract>=0.3.10",   # `ocr-page` — needs tesseract binary installed
     "tomli>=2.0; python_version<'3.11'",
 ]
 
@@ -59,6 +60,6 @@ strict = true
 files = ["src/iiif_utils"]
 
 [[tool.mypy.overrides]]
-module = ["lxml.*", "sqlite_utils.*"]
+module = ["lxml.*", "sqlite_utils.*", "pytesseract.*"]
 ignore_missing_imports = true
 follow_untyped_imports = true
