@@ -4,8 +4,11 @@ from __future__ import annotations
 import re
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 import click
+
+from iiif_utils.utils import output as output_
 
 # Hyphenated terms confuse FTS5 — quote them automatically.
 _HYPHEN = re.compile(r"\b[A-Za-z]+(-[A-Za-z]+)+\b")
@@ -28,15 +31,17 @@ def _massage(query: str, raw: bool) -> str:
 @click.option("-l", "--limit", type=int, default=10)
 @click.option("--raw", is_flag=True, default=False,
               help="Don't auto-quote hyphenated tokens.")
+@output_.format_option(default="records")
 def search_index(index: Path, query: str, blocks: bool, limit: int,
-                  raw: bool) -> None:
+                  raw: bool, fmt: str) -> None:
     """Run an FTS5 query against the index."""
     q = _massage(query, raw)
     conn = sqlite3.connect(f"file:{index}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
 
+    out: list[dict[str, Any]] = []
     if blocks:
-        rows = list(conn.execute("""
+        db_rows = list(conn.execute("""
             SELECT
                 tb.page_id, tb.block_number,
                 tb.bbox_x0, tb.bbox_y0, tb.bbox_x1, tb.bbox_y1,
@@ -48,14 +53,17 @@ def search_index(index: Path, query: str, blocks: bool, limit: int,
             WHERE text_blocks_fts MATCH ?
             ORDER BY ts.rank LIMIT ?
         """, (q, limit)))
-        for r in rows:
-            pn = r["book_page_number"] or "—"
-            click.echo(f"canvas {r['page_id']:>4} (p.{pn}) blk{r['block_number']}"
-                       f"  bbox=({r['bbox_x0']},{r['bbox_y0']},"
-                       f"{r['bbox_x1']},{r['bbox_y1']})")
-            click.echo(f"  {r['snip']}")
+        for r in db_rows:
+            out.append({
+                "canvas": r["page_id"],
+                "page": r["book_page_number"],
+                "block": r["block_number"],
+                "bbox": [r["bbox_x0"], r["bbox_y0"],
+                          r["bbox_x1"], r["bbox_y1"]],
+                "snippet": r["snip"],
+            })
     else:
-        rows = list(conn.execute("""
+        db_rows = list(conn.execute("""
             SELECT
                 pf.page_id, pn.book_page_number,
                 snippet(pages_fts, 0, '→', '←', '...', 24) AS snip
@@ -64,6 +72,11 @@ def search_index(index: Path, query: str, blocks: bool, limit: int,
             WHERE pages_fts MATCH ?
             ORDER BY rank LIMIT ?
         """, (q, limit)))
-        for r in rows:
-            pn = r["book_page_number"] or "—"
-            click.echo(f"canvas {r['page_id']:>4} (p.{pn})  {r['snip']}")
+        for r in db_rows:
+            out.append({
+                "canvas": r["page_id"],
+                "page": r["book_page_number"],
+                "snippet": r["snip"],
+            })
+
+    output_.write_records(out, fmt=fmt)

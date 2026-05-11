@@ -79,6 +79,62 @@ def test_clamp_dims_falls_back_to_canvas_dims():
     assert image_api.clamp_dims_from_page_row(row) == (1731, 2903)
 
 
+def test_output_formats_roundtrip():
+    """Smoke-test all four output formats over the same rows."""
+    import io
+    import json as json_
+    from iiif_utils.utils.output import write_records
+
+    rows = [
+        {"canvas": 198, "n": 0, "bbox": [454, 306, 1148, 2676],
+         "url": "https://x/y"},
+        {"canvas": 312, "n": 1, "bbox": [100, 100, 200, 200],
+         "url": None},
+    ]
+
+    # json: round-trippable
+    buf = io.StringIO()
+    write_records(rows, "json", fp=buf)
+    parsed = json_.loads(buf.getvalue())
+    assert parsed == rows
+
+    # jsonl: one record per line
+    buf = io.StringIO()
+    write_records(rows, "jsonl", fp=buf)
+    lines = [line for line in buf.getvalue().splitlines() if line]
+    assert len(lines) == 2
+    assert json_.loads(lines[0])["canvas"] == 198
+
+    # csv: header + 2 rows
+    buf = io.StringIO()
+    write_records(rows, "csv", fp=buf)
+    out_lines = [line for line in buf.getvalue().splitlines() if line]
+    assert len(out_lines) == 3
+    assert out_lines[0].startswith("canvas,")
+
+    # table: header + 2 rows
+    buf = io.StringIO()
+    write_records(rows, "table", fp=buf)
+    assert "canvas" in buf.getvalue()
+    assert "198" in buf.getvalue()
+
+    # records: key: value lines
+    buf = io.StringIO()
+    write_records(rows, "records", fp=buf)
+    assert "canvas: 198" in buf.getvalue()
+    assert "canvas: 312" in buf.getvalue()
+
+
+def test_listing_commands_accept_format_flag():
+    """--format is wired on list-figures / list-files / search-index."""
+    r = CliRunner().invoke(cli, ["list-figures", "--help"])
+    assert "--format" in r.output
+    r = CliRunner().invoke(cli, ["list-files", "--help"])
+    assert "--format" in r.output
+    r = CliRunner().invoke(cli, ["search-index", "--help"])
+    assert "--format" in r.output
+
+
 MINIMAL_ALTO = b"""<?xml version='1.0'?>
 <alto xmlns="http://www.loc.gov/standards/alto/ns-v2#">
   <Description><MeasurementUnit>pixel</MeasurementUnit></Description>
