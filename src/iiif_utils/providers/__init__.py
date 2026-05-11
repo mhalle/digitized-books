@@ -13,10 +13,17 @@ B_NUMBER_RE = re.compile(r"^b\d{7}[\dx]$", re.IGNORECASE)
 
 @dataclass(frozen=True)
 class ManifestRef:
-    """Result of resolving a user-supplied reference to a manifest."""
+    """Result of resolving a user-supplied reference to a manifest.
+
+    `manifest_payload` lets a provider supply a synthesized manifest
+    (a dict) instead of a URL to fetch. Used by the LoC adapter, which
+    builds an in-memory IIIF v2 manifest from the LoC item-level JSON.
+    When set, `create-index` uses the payload directly.
+    """
     manifest_url: str
-    provider_key: str           # 'wellcome' | 'generic'
-    extra_metadata: dict[str, str]  # provider-specific document_metadata to merge
+    provider_key: str           # 'wellcome' | 'generic' | 'loc' | ...
+    extra_metadata: dict[str, str]
+    manifest_payload: dict[str, Any] | None = None
 
 
 def resolve(ref: str, *, cfg: dict[str, Any], explicit_provider: str | None = None,
@@ -26,7 +33,8 @@ def resolve(ref: str, *, cfg: dict[str, Any], explicit_provider: str | None = No
     Inputs accepted:
       - HTTPS URL — if hostname matches a configured provider, attribute to it
       - Wellcome b-number (b + 7 digits + digit-or-x) — Wellcome only
-      - Wellcome work ID — resolves via catalogue to a b-number, then to a manifest
+      - Wellcome work ID — resolves via catalogue to a b-number, then manifest
+      - LoC item URL or LCCN — synthesizes a manifest from item JSON
     """
     cfg_http = cfg.get("http", {})
 
@@ -34,6 +42,10 @@ def resolve(ref: str, *, cfg: dict[str, Any], explicit_provider: str | None = No
         provider_key = explicit_provider
     else:
         provider_key = _guess_provider(ref, cfg)
+
+    # LoC has no real manifest URL — even URL inputs need synthesis.
+    if provider_key == "loc":
+        return _resolve_loc(ref, cfg=cfg, cfg_http=cfg_http, cache_dir=cache_dir)
 
     if ref.startswith(("http://", "https://")):
         return ManifestRef(
@@ -54,6 +66,9 @@ def resolve(ref: str, *, cfg: dict[str, Any], explicit_provider: str | None = No
 def _guess_provider(ref: str, cfg: dict[str, Any]) -> str:
     if ref.startswith(("http://", "https://")):
         host = urlparse(ref).hostname or ""
+        # LoC item URLs need the loc provider (synthesizes the manifest)
+        if host and host.endswith("loc.gov") and "/item/" in ref:
+            return "loc"
         # Hostname → provider key, if any configured provider declares an iiif_base
         for key, p in (cfg.get("providers") or {}).items():
             base = p.get("iiif_base")
@@ -62,10 +77,39 @@ def _guess_provider(ref: str, cfg: dict[str, Any]) -> str:
         return str(cfg.get("default_provider", "generic"))
     if B_NUMBER_RE.match(ref):
         return "wellcome"
-    # Wellcome work IDs are 8 lowercase alphanumeric — heuristic.
-    if re.match(r"^[a-z0-9]{8}$", ref):
+    # LoC LCCN: pure-digit (8-10) or letter-prefixed digit string.
+    # Check before the Wellcome work-id heuristic since pure-digit
+    # strings like '49043519' look like work-ids too.
+    from iiif_utils.providers import loc as loc_mod  # lazy: avoid cycle
+    if loc_mod.looks_like_lccn(ref):
+        return "loc"
+    # Wellcome work IDs are 8 lowercase alphanumeric containing at least
+    # one letter — heuristic.
+    if re.match(r"^[a-z0-9]{8}$", ref) and re.search(r"[a-z]", ref):
         return "wellcome"
     return str(cfg.get("default_provider", "generic"))
+
+
+def _resolve_loc(ref: str, *, cfg: dict[str, Any], cfg_http: dict[str, Any],
+                  cache_dir: Any) -> ManifestRef:
+    from iiif_utils.providers import loc as loc_mod
+    lccn = loc_mod.parse_ref(ref)
+    if not lccn:
+        raise ValueError(
+            f"Cannot extract LoC LCCN from {ref!r} — pass an LCCN like "
+            f"'49043519' or a full URL like "
+            f"'https://www.loc.gov/item/49043519/'."
+        )
+    item_json = loc_mod.fetch_item_json(lccn, cfg_http=cfg_http,
+                                         cache_dir=cache_dir)
+    manifest = loc_mod.synthesize_manifest(lccn, item_json)
+    extra = loc_mod.extra_metadata_from_item(item_json)
+    return ManifestRef(
+        manifest_url=manifest["@id"],
+        provider_key="loc",
+        extra_metadata=extra,
+        manifest_payload=manifest,
+    )
 
 
 def _resolve_wellcome(ref: str, *, cfg: dict[str, Any], cfg_http: dict[str, Any],

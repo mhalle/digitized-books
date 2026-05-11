@@ -20,6 +20,10 @@ class Canvas:
     width: int | None
     height: int | None
     alto_url: str | None     # canvas-level ALTO seeAlso, if any
+    text_url: str | None     # canvas-level plain-text seeAlso, if any
+                              # (used as fallback when ALTO is absent;
+                              # e.g. LoC items that have per-page .txt but
+                              # no per-page ALTO)
 
 
 @dataclass(frozen=True)
@@ -141,6 +145,22 @@ def _alto_seealso(canvas: dict[str, Any]) -> str | None:
     return None
 
 
+def _text_seealso(canvas: dict[str, Any]) -> str | None:
+    """Return canvas-level seeAlso URL with format=text/plain, if any.
+
+    Used as an OCR fallback when ALTO is not present per-canvas
+    (e.g. LoC items expose `.txt` per page but not `.alto.xml`).
+    """
+    for s in canvas.get("seeAlso", []) or []:
+        if not isinstance(s, dict):
+            continue
+        fmt = (s.get("format") or "").lower()
+        if fmt == "text/plain":
+            url = s.get("id") or s.get("@id")
+            return str(url) if url else None
+    return None
+
+
 def canvases(manifest: dict[str, Any]) -> list[Canvas]:
     """Return one Canvas per item in the manifest's sequence."""
     version = presentation_version(manifest)
@@ -165,6 +185,7 @@ def canvases(manifest: dict[str, Any]) -> list[Canvas]:
             width=c.get("width"),
             height=c.get("height"),
             alto_url=_alto_seealso(c),
+            text_url=_text_seealso(c),
         ))
     return out
 

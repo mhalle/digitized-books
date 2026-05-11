@@ -42,8 +42,11 @@ def info(ctx: click.Context, ref: str | None, index: Path | None,
     cache_dir = Path(cfg.get("http", {}).get("cache_dir", "./.iiif-cache")).expanduser()
 
     ref_obj = resolve(ref, cfg=cfg, explicit_provider=provider, cache_dir=cache_dir)
-    m = http_.fetch_json(ref_obj.manifest_url, cfg_http=cfg.get("http", {}),
-                          cache_dir=cache_dir)
+    if ref_obj.manifest_payload is not None:
+        m = ref_obj.manifest_payload
+    else:
+        m = http_.fetch_json(ref_obj.manifest_url, cfg_http=cfg.get("http", {}),
+                              cache_dir=cache_dir)
 
     _print_kv("manifest_url", ref_obj.manifest_url)
     _print_kv("provider", ref_obj.provider_key)

@@ -84,10 +84,14 @@ async def fetch_many_bytes(
     suffix: str = "",
     on_progress: Any = None,
 ) -> dict[str, bytes]:
-    """Concurrent fetch with file cache. Returns {url: bytes}."""
+    """Concurrent fetch with file cache + 429/5xx retry. Returns {url: bytes}."""
     headers = {"User-Agent": cfg_http.get("user_agent", "iiif-utils/0.1")}
     timeout = httpx.Timeout(float(cfg_http.get("timeout_seconds", 60)))
     concurrency = int(cfg_http.get("max_concurrency", 8))
+    max_retries = int(cfg_http.get("max_retries", 8))
+    base_backoff = float(cfg_http.get("retry_base_seconds", 0.5))
+    # Retry classes: 429 = rate-limited; 5xx = any server-side hiccup,
+    # covering Cloudflare-specific 520-527 codes that LoC's edge emits.
     sem = asyncio.Semaphore(concurrency)
     out: dict[str, bytes] = {}
 
@@ -99,16 +103,33 @@ async def fetch_many_bytes(
                 if on_progress:
                     on_progress(url, "cached")
                 return
-        async with sem:
-            r = await client.get(url)
+        for attempt in range(max_retries + 1):
+            async with sem:
+                try:
+                    r = await client.get(url)
+                except (httpx.RemoteProtocolError, httpx.ReadError,
+                         httpx.ConnectError):
+                    if attempt == max_retries:
+                        raise
+                    await asyncio.sleep(base_backoff * (2 ** attempt))
+                    continue
+            if r.status_code == 429 or 500 <= r.status_code < 600:
+                # Respect Retry-After if present, else exponential backoff.
+                ra = r.headers.get("retry-after")
+                delay = (float(ra) if ra and ra.isdigit()
+                         else base_backoff * (2 ** attempt))
+                if attempt == max_retries:
+                    r.raise_for_status()
+                await asyncio.sleep(delay)
+                continue
             r.raise_for_status()
-            content = r.content
-        out[url] = content
-        if cache_dir is not None:
-            cp = cache_path(cache_dir, url, suffix)
-            cp.write_bytes(content)
-        if on_progress:
-            on_progress(url, "ok")
+            out[url] = r.content
+            if cache_dir is not None:
+                cp = cache_path(cache_dir, url, suffix)
+                cp.write_bytes(r.content)
+            if on_progress:
+                on_progress(url, "ok")
+            return
 
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True,
                                  headers=headers,

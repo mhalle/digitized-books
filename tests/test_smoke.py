@@ -46,6 +46,75 @@ def test_create_mosaic_tiny():
     assert im.size == (200, 150)
 
 
+def test_loc_lccn_recognizer():
+    from iiif_utils.providers.loc import looks_like_lccn, parse_ref
+    assert looks_like_lccn("49043519")
+    assert looks_like_lccn("18017427")
+    assert looks_like_lccn("a33000991")
+    assert not looks_like_lccn("b22396147")  # Wellcome b-number
+    assert not looks_like_lccn("kdckv24y")    # Wellcome work id
+    assert parse_ref("49043519") == "49043519"
+    assert parse_ref("https://www.loc.gov/item/49043519/") == "49043519"
+    assert parse_ref("https://loc.gov/item/49043519") == "49043519"
+    assert parse_ref("not a thing") is None
+
+
+def test_loc_synthesize_manifest():
+    from iiif_utils.providers.loc import synthesize_manifest
+    item_json = {
+        "item": {
+            "title": "Test Book",
+            "date": "1543",
+            "contributor_names": ["Author One"],
+            "subject": ["Anatomy"],
+            "language": ["Latin"],
+        },
+        "resources": [{
+            "pdf": "https://example.org/book.pdf",
+            "fulltext_file": "https://example.org/book.txt",
+            "files": [
+                # canvas 0 — ALTO + plain text + image
+                [
+                    {"mimetype": "image/jpeg",
+                     "url": "https://tile.loc.gov/image-services/iiif/SVC1/full/pct:100/0/default.jpg"},
+                    {"mimetype": "text/xml",
+                     "url": "https://tile.loc.gov/storage/foo/0001.alto.xml"},
+                    {"mimetype": "text/plain",
+                     "url": "https://tile.loc.gov/storage/foo/0001.txt"},
+                ],
+                # canvas 1 — plain text only (Vesalius case)
+                [
+                    {"mimetype": "image/jpeg",
+                     "url": "https://tile.loc.gov/image-services/iiif/SVC2/full/pct:100/0/default.jpg"},
+                    {"mimetype": "text/plain",
+                     "url": "https://tile.loc.gov/storage/foo/0002.txt"},
+                ],
+            ],
+        }],
+    }
+    m = synthesize_manifest("49043519", item_json)
+    assert m["@type"] == "sc:Manifest"
+    assert m["label"] == "Test Book"
+    cans = m["sequences"][0]["canvases"]
+    assert len(cans) == 2
+    # canvas 0 — both ALTO and text seeAlso
+    sa0 = cans[0]["seeAlso"]
+    assert any(s["format"] == "text/xml" and "alto" in s["profile"].lower()
+                for s in sa0)
+    assert any(s["format"] == "text/plain" for s in sa0)
+    # canvas 1 — only text seeAlso
+    sa1 = cans[1]["seeAlso"]
+    assert all(s["format"] != "text/xml" for s in sa1)
+    assert any(s["format"] == "text/plain" for s in sa1)
+    # image service URL stripped to base
+    assert cans[0]["images"][0]["resource"]["service"]["@id"] == \
+        "https://tile.loc.gov/image-services/iiif/SVC1"
+    # rendering carries PDF + fulltext
+    fmts = {r["format"] for r in m["rendering"]}
+    assert "application/pdf" in fmts
+    assert "text/plain" in fmts
+
+
 def test_resolve_leaf_explicit_leaf():
     import sqlite3 as _sql
     from iiif_utils.utils.page import resolve_leaf

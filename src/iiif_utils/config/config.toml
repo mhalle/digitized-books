@@ -10,6 +10,16 @@ catalogue_api = "https://api.wellcomecollection.org/catalogue/v2"
 iiif_base = "https://iiif.wellcomecollection.org"
 ocr_preference = ["alto", "rendering_text", "content_search"]
 
+[providers.loc]
+type = "loc"
+catalogue_api = "https://www.loc.gov"
+iiif_image_base = "https://tile.loc.gov/image-services/iiif"
+# LoC has no Presentation manifest — the adapter synthesizes one in
+# memory from the item-level `?fo=json` payload.
+ocr_preference = ["alto", "text_rendering"]
+# LoC rate-limits aggressively (429 at ~8 concurrent). Be polite.
+max_concurrency = 2
+
 [http]
 user_agent = "iiif-utils/0.1"
 timeout_seconds = 60
