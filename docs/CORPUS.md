@@ -78,8 +78,8 @@ These are essential historically but harder to use as LLM-indexable text because
 
 | Pick | Work | Wellcome ID | Date | lic | Notes |
 |------|------|-------------|------|-----|-------|
-| ★ | Vesalius, *Epitome* | `g6b6smge` | 1543 | pdm | Companion abridgement to the *Fabrica*. Distinct work from the *Fabrica* itself — keep. |
-| ★ | Valverde, *Historia de la composicion del cuerpo humano* | `nrtzmcfn` | 1556 | pdm | Pick the cleaner-scan record (verify between `nrtzmcfn` and `dc5q26zu`). |
+| ★ | Vesalius, *Epitome* | `g6b6smge` | 1543 | pdm | Companion abridgement to the *Fabrica*. Distinct work from the *Fabrica* itself — keep. **No ALTO on Wellcome** (pre-1600 woodcut Latin defeats ABBYY); see "OCR / ALTO availability" below. |
+| ★ | Valverde, *Historia de la composicion del cuerpo humano* | `nrtzmcfn` | 1556 | pdm | Pick the cleaner-scan record (verify between `nrtzmcfn` and `dc5q26zu`). **No ALTO on Wellcome** — same reason. |
 | ★ | Crooke, *Mikrokosmographia* | `resfyxts` | 1618 | pdm | First major English-language anatomy. The 1651 ed (`hxp9yd6a`) — skip unless 1618 OCR is unusable. |
 | ★ | Cheselden, *Osteographia* | `jfkydvqm` | 1733 | pdm | English. Bone atlas. |
 | ★ | Albinus, *Tabulae sceleti et musculorum* (English ed) | `r3thaf6m` | 1754 | pdm | The English translation makes the captions usable. Latin originals (`a43g5vnz` 1747, `yw45y2s7` 1749) — skip unless you want the Latin. |
@@ -153,15 +153,22 @@ These are textbooks I would include in a serious anatomy corpus that are missing
 
 ## OCR / ALTO availability — practical notes
 
-We've validated through previous work in this project that:
+ALTO coverage across ★ picks audited 2026-05-11
+(see `experiments/alto_coverage/`). Headlines:
 
-1. **Older Wellcome scans** (the bulk of the early-20th-c textbooks above) carry ALTO XML with `<TextBlock>` plus often `<Illustration>` blocks. Per-page coordinates work for region addressing. The Quain's, Holden, Ellis, Schäfer batches are like this.
+1. **Wellcome has backfilled ALTO across the 19th–20th-c picks.** Every Sobotta 1927–28 (English + German + histology), Rauber-Kopsch 1912, Piersol 1918, Crooke 1618, Cheselden 1733, Albinus 1754, Hunter 1815, and Bourgery 1831–54 sampled has **100% ALTO coverage**. Earlier editions of this document said Sobotta 1927–28 and "some 1912 items" lacked ALTO — that claim is now stale; Wellcome's pipeline has caught up. ALTO is the structured XML carrying `<TextBlock>` (with per-block bboxes) plus often `<Illustration>` regions; coordinates are in image-native pixels.
 
-2. **Newer Wellcome scans** (some Sobotta 1927–28, some 1912 items) lack ALTO entirely and need re-OCR if you want structured text. JP2 page images are still openly downloadable.
+2. **Genuine ALTO-less cases on Wellcome: pre-1600 books only.** Confirmed in our sample:
+   - **Vesalius *Epitome* 1543** (`g6b6smge`): 55 canvases, 0 ALTO
+   - **Valverde 1556** (`nrtzmcfn`): 374 canvases, 0 ALTO
 
-3. **The `seeAlso` element** in the IIIF v2 manifest is the universal signal for ALTO availability. For v3 manifests served from `iiif.wellcomecollection.org`, the convention isn't yet stable.
+   Both are 16th-century woodcut/letterpress in Latin/Spanish; Wellcome's ABBYY pipeline doesn't handle pre-1600 typography. Crooke 1618 (English) is the boundary case where coverage resumes. For these works, `iiif-utils create-index` will produce a metadata-only index with `text_blocks` and `illustrations` empty; full-text search isn't possible from Wellcome's pipeline. Two paths to recover text:
+   - **External ingest** — the Vesalius *Fabrica* is already flagged for LoC / BIU Santé external pull below; the *Epitome* could follow a similar pattern.
+   - **Local re-OCR** — `iiif-utils ocr-pages` (planned) would run Tesseract on each canvas. Note Tesseract's Latin model is trained on modern Latin typography; 1543 woodcut Latin remains hard.
 
-4. **OCR quality** is generally good for late-19th/early-20th-c serif typesetting (95%+ word accuracy), degrades on blackletter (Henle, some German atlases) and pre-1700 typography (Crooke, Vesalius, Valverde) where you should expect 60–80% and budget for re-OCR or hand correction on critical pages.
+3. **The `seeAlso` element** on each canvas is the universal signal for per-canvas ALTO availability. We match `format == "text/xml"` AND a `profile` containing `alto` (Wellcome advertises the v3 profile string but serves v2 XML — both name-spaces handled).
+
+4. **OCR quality** is generally good for late-19th/early-20th-c serif typesetting (95%+ word accuracy), degrades on blackletter (Henle, some German atlases) and on the 16th–17th-c works where ALTO exists but accuracy drops to 60–80%. Budget for re-OCR or hand correction on critical pages in those tiers.
 
 5. **For corpus indexing**, treat Tier 1–2 as text-primary and Tier 3 as image-primary. Tier 4 is image-primary plus selectively OCR'd captions and headings.
 
