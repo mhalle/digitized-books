@@ -93,24 +93,6 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
         log.warn(f"multiple volumes concatenated: "
                  f"{flags.contains_multiple_volumes}")
 
-    # --- index_metadata ----------------------------------------------------
-    from iiif_utils import __version__
-    idx_md = {
-        "slug": slug,
-        "created_at": db_mod.now_iso(),
-        "index_mode": "alto",
-        "provider": ref_obj.provider_key,
-        "provider_kind": "iiif",
-        "manifest_url": ref_obj.manifest_url,
-        "presentation_api_version": manifest_mod.presentation_version(manifest),
-        "iiif_utils_version": __version__,
-    }
-    if flags.partial_digitization:
-        idx_md["partial_digitization"] = flags.partial_digitization
-    if flags.contains_multiple_volumes:
-        idx_md["contains_multiple_volumes"] = flags.contains_multiple_volumes
-    db_mod.write_index_metadata(db, idx_md)
-
     # --- document_metadata -------------------------------------------------
     doc_md: dict[str, str] = {}
     if title:
@@ -149,9 +131,38 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
     tb_rows: list[dict[str, Any]] = []
     il_rows: list[dict[str, Any]] = []
     image_dims: dict[int, tuple[int, int]] = {}
+    n_alto_canvases = sum(1 for c in canvases if c.alto_url)
     if canvases:
         tb_rows, il_rows, image_dims = _parse_altos(
             canvases, cfg_http=cfg_http, cache_dir=cache_dir, log=log,
+        )
+
+    # --- index_metadata (after parse so we know the OCR provenance) --------
+    from iiif_utils import __version__
+    ocr_source = "alto" if n_alto_canvases > 0 else "none"
+    idx_md = {
+        "slug": slug,
+        "created_at": db_mod.now_iso(),
+        "index_mode": "alto",
+        "ocr_source": ocr_source,
+        "provider": ref_obj.provider_key,
+        "provider_kind": "iiif",
+        "manifest_url": ref_obj.manifest_url,
+        "presentation_api_version": manifest_mod.presentation_version(manifest),
+        "iiif_utils_version": __version__,
+    }
+    if flags.partial_digitization:
+        idx_md["partial_digitization"] = flags.partial_digitization
+    if flags.contains_multiple_volumes:
+        idx_md["contains_multiple_volumes"] = flags.contains_multiple_volumes
+    db_mod.write_index_metadata(db, idx_md)
+
+    # ALTO-less corpus warning — fires even without -v
+    if canvases and ocr_source == "none":
+        log.warn(
+            f"no per-canvas ALTO found for any of {len(canvases)} canvases; "
+            f"index will be image-only (text_blocks empty, no FTS hits). "
+            f"Use `iiif-utils ocr-page` to run Tesseract on individual pages."
         )
 
     # --- page_numbers ------------------------------------------------------

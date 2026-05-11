@@ -28,6 +28,7 @@ import click
 from iiif_utils.config import load_config
 from iiif_utils.core import http as http_
 from iiif_utils.core import image_api
+from iiif_utils.utils.page import resolve_leaf
 
 # Map common ISO-639-3 / display-name language values stored in IIIF
 # manifests / catalogue records to Tesseract's language codes.
@@ -71,26 +72,6 @@ def _parse_bbox(spec: str) -> tuple[int, int, int, int]:
                 int(parts[2]), int(parts[3]))
     except ValueError as e:
         raise click.UsageError(f"--bbox parse error: {e}") from e
-
-
-def _resolve_leaf(conn: sqlite3.Connection, leaf: int | None,
-                   book: str | None) -> int:
-    """Resolve --leaf or --book to a leaf_num via the page_numbers table."""
-    if leaf is not None and book is not None:
-        raise click.UsageError("Pass --leaf OR --book, not both.")
-    if leaf is not None:
-        return leaf
-    if book is None:
-        raise click.UsageError("One of --leaf / --book is required.")
-    row = conn.execute(
-        "SELECT leaf_num FROM page_numbers WHERE book_page_number = ?",
-        (book,),
-    ).fetchone()
-    if not row:
-        raise click.ClickException(
-            f"No leaf found for printed page {book!r}."
-        )
-    return int(row["leaf_num"])
 
 
 def _language_from_index(conn: sqlite3.Connection) -> str | None:
@@ -166,7 +147,7 @@ def ocr_page(index: Path, leaf_num: int | None, book: str | None,
     conn = sqlite3.connect(f"file:{index}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
 
-    leaf = _resolve_leaf(conn, leaf_num, book)
+    leaf = resolve_leaf(conn, leaf_num, book)
     pn = conn.execute(
         "SELECT image_service_url, width, height, "
         "image_width, image_height FROM page_numbers WHERE leaf_num=?",

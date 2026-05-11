@@ -1,6 +1,7 @@
 """Smoke tests — no network. Validate pure-function modules and CLI shell."""
 from __future__ import annotations
 
+import click
 from click.testing import CliRunner
 
 from iiif_utils.cli import cli
@@ -43,6 +44,43 @@ def test_create_mosaic_tiny():
     im = _Image.open(_io.BytesIO(out))
     assert im.format == "JPEG"
     assert im.size == (200, 150)
+
+
+def test_resolve_leaf_explicit_leaf():
+    import sqlite3 as _sql
+    from iiif_utils.utils.page import resolve_leaf
+    conn = _sql.connect(":memory:")
+    conn.row_factory = _sql.Row
+    conn.execute("CREATE TABLE page_numbers ("
+                 "leaf_num INTEGER PRIMARY KEY, book_page_number TEXT)")
+    conn.execute("INSERT INTO page_numbers VALUES (756, '737')")
+    conn.execute("INSERT INTO page_numbers VALUES (760, '741')")
+    conn.commit()
+    # explicit leaf
+    assert resolve_leaf(conn, 198, None) == 198
+    # via book lookup
+    assert resolve_leaf(conn, None, "737") == 756
+    assert resolve_leaf(conn, None, "741") == 760
+
+
+def test_resolve_leaf_errors():
+    import sqlite3 as _sql
+    import pytest as _pt
+    from iiif_utils.utils.page import resolve_leaf
+    conn = _sql.connect(":memory:")
+    conn.row_factory = _sql.Row
+    conn.execute("CREATE TABLE page_numbers ("
+                 "leaf_num INTEGER PRIMARY KEY, book_page_number TEXT)")
+    conn.commit()
+    # both → error
+    with _pt.raises(click.UsageError):
+        resolve_leaf(conn, 1, "2")
+    # neither → error
+    with _pt.raises(click.UsageError):
+        resolve_leaf(conn, None, None)
+    # book that doesn't exist → ClickException
+    with _pt.raises(click.ClickException):
+        resolve_leaf(conn, None, "999")
 
 
 def test_ocr_page_bbox_parser():

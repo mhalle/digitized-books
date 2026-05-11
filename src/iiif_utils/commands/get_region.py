@@ -9,12 +9,16 @@ import click
 from iiif_utils.config import load_config
 from iiif_utils.core import http as http_
 from iiif_utils.core import image_api
+from iiif_utils.utils.page import resolve_leaf
 
 
 @click.command(name="get-region")
 @click.option("-i", "--index", required=True,
               type=click.Path(exists=True, path_type=Path))
-@click.option("-l", "--leaf", "leaf_num", type=int, required=True)
+@click.option("-l", "--leaf", "leaf_num", type=int, default=None,
+              help="Canvas (leaf) index, 0-based. Mutually exclusive with -b.")
+@click.option("-b", "--book", default=None,
+              help="Printed page number (looks up via page_numbers).")
 @click.option("--bbox", "bbox_str", required=True,
               help="Region as 'x0,y0,x1,y1' (image pixels).")
 @click.option("-o", "--output", "output_path",
@@ -27,7 +31,8 @@ from iiif_utils.core import image_api
 @click.option("--url-only", is_flag=True, default=False)
 @click.option("--config", "config_path", type=click.Path(path_type=Path),
               default=None)
-def get_region(index: Path, leaf_num: int, bbox_str: str,
+def get_region(index: Path, leaf_num: int | None, book: str | None,
+                bbox_str: str,
                 output_path: Path | None, padding: str | None,
                 size: str, fmt: str, url_only: bool,
                 config_path: Path | None) -> None:
@@ -43,6 +48,7 @@ def get_region(index: Path, leaf_num: int, bbox_str: str,
     cfg = load_config(config_path)
     conn = sqlite3.connect(f"file:{index}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
+    leaf_num = resolve_leaf(conn, leaf_num, book)
     row = conn.execute(
         "SELECT image_service_url, width, height, "
         "image_width, image_height FROM page_numbers "
