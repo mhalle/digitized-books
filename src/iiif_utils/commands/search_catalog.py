@@ -68,7 +68,8 @@ def _parse_year(spec: str) -> tuple[str | None, str | None]:
 @click.option("--sort-desc", is_flag=True, default=False,
               help="Descending sort (default: ascending).")
 @click.option("-P", "--provider", default="wellcome",
-              help="Provider key (only 'wellcome' wired in v1).")
+              type=click.Choice(["wellcome", "loc"]),
+              help="Provider key. wellcome | loc.")
 @output_.format_option(default="table")
 @click.option("--config", "config_path", type=click.Path(path_type=Path),
               default=None)
@@ -79,16 +80,22 @@ def search_catalog(query: str | None, year: str | None, creator: str | None,
                  limit: int, page: int, sort_by_date: bool, sort_desc: bool,
                  provider: str, fmt: str,
                  config_path: Path | None) -> None:
-    """Search a provider's catalogue for works."""
-    if provider != "wellcome":
-        raise click.ClickException(
-            f"Provider {provider!r} has no catalogue search wired in v1. "
-            "Use 'wellcome' or pass a manifest URL directly to "
-            "`iiif-utils create-index`."
-        )
-
+    """Search a provider's catalog for works."""
     cfg = load_config(config_path)
     cfg_http = cfg.get("http", {})
+
+    if provider == "loc":
+        _search_loc(
+            query=query, year=year, creator=creator, subject=subject,
+            languages=languages, work_type=work_type,
+            license_id=license_id, has_iiif=has_iiif,
+            access_status=access_status, limit=limit, page=page,
+            sort_by_date=sort_by_date, sort_desc=sort_desc,
+            fmt=fmt, cfg_http=cfg_http,
+        )
+        return
+
+    # --- Wellcome branch ---------------------------------------------------
     catalogue_api = cfg["providers"]["wellcome"]["catalogue_api"]
 
     params: list[tuple[str, str]] = [
@@ -143,6 +150,111 @@ def search_catalog(query: str | None, year: str | None, creator: str | None,
             f"\n  page {page}/{page_total} — showing {shown} of {total} hits",
             err=True,
         )
+
+
+def _search_loc(*, query: str | None, year: str | None,
+                  creator: str | None, subject: str | None,
+                  languages: tuple[str, ...], work_type: str | None,
+                  license_id: str | None, has_iiif: bool,
+                  access_status: str | None, limit: int, page: int,
+                  sort_by_date: bool, sort_desc: bool, fmt: str,
+                  cfg_http: dict[str, Any]) -> None:
+    """LoC search via `loc.gov/search/?fa=...&fo=json`.
+
+    Filters not directly translatable (license_id, work_type,
+    access_status) are silently ignored. `has_iiif` is implied because
+    LoC's `online-format:online image` essentially means "has IIIF
+    Image"; we apply it whenever `has_iiif` is True.
+    """
+    from urllib.parse import urlencode
+
+    facets: list[str] = []
+    # Books unless caller specifies otherwise (work_type ignored for now;
+    # LoC doesn't have Wellcome's letter codes).
+    facets.append("original-format:book")
+    if has_iiif:
+        facets.append("online-format:online image")
+    if subject:
+        facets.append(f"subject:{subject}")
+    if creator:
+        facets.append(f"contributor:{creator}")
+    for lang in languages:
+        facets.append(f"language:{lang}")
+
+    params: list[tuple[str, str]] = [
+        ("fo", "json"),
+        ("c", str(max(1, min(100, limit)))),
+        ("sp", str(max(1, page))),
+    ]
+    if query:
+        params.append(("q", query))
+    for f in facets:
+        params.append(("fa", f))
+    if year:
+        # LoC dates= filter accepts YYYY/YYYY for ranges, YYYY for single
+        y_from, y_to = _parse_year(year)
+        # Use just year part of YYYY-MM-DD
+        from_year = (y_from.split("-", 1)[0] if y_from else None)
+        to_year = (y_to.split("-", 1)[0] if y_to else None)
+        if from_year and to_year:
+            params.append(("dates", f"{from_year}/{to_year}"))
+        elif from_year:
+            params.append(("dates", f"{from_year}/9999"))
+        elif to_year:
+            params.append(("dates", f"0001/{to_year}"))
+    if sort_by_date:
+        params.append(("sb", "date" + ("_desc" if sort_desc else "")))
+
+    url = f"https://www.loc.gov/search/?{urlencode(params, doseq=True)}"
+    payload = http_.fetch_json(url, cfg_http=cfg_http)
+    results = payload.get("results") or []
+    pagination = payload.get("pagination") or {}
+
+    rows = [_summarize_loc(r) for r in results]
+    output_.write_records(rows, fmt=fmt)
+
+    if fmt in ("table", "records") and pagination:
+        cur = pagination.get("current")
+        total_pages = pagination.get("total") or pagination.get("totalPages")
+        if cur and total_pages:
+            click.echo(f"\n  page {cur}/{total_pages}", err=True)
+
+
+def _summarize_loc(item: dict[str, Any]) -> dict[str, Any]:
+    """Normalize one LoC search hit."""
+    title = item.get("title") or ""
+    item_url = item.get("id") or ""
+    # LCCN: last path segment of item URL https://www.loc.gov/item/{lccn}/
+    lccn = item_url.rstrip("/").rsplit("/", 1)[-1] if item_url else None
+
+    year = None
+    dates = item.get("dates") or item.get("date")
+    if isinstance(dates, list) and dates:
+        year = str(dates[0])
+    elif isinstance(dates, str):
+        year = dates
+
+    def _joined(key: str) -> str | None:
+        v = item.get(key)
+        if isinstance(v, list):
+            return " | ".join(str(x) for x in v if x)
+        return str(v) if v else None
+
+    fmts = item.get("online_format") or []
+    if isinstance(fmts, list):
+        online_format = " | ".join(str(x) for x in fmts)
+    else:
+        online_format = str(fmts) if fmts else None
+
+    return {
+        "id": lccn,
+        "year": year,
+        "title": title[:60] + ("…" if len(title) > 60 else ""),
+        "contributors": _joined("contributor_names"),
+        "languages": _joined("language"),
+        "online_format": online_format,
+        "item_url": item_url,
+    }
 
 
 def _summarize(work: dict[str, Any]) -> dict[str, Any]:
