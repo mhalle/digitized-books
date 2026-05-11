@@ -503,21 +503,63 @@ Providers are first-class. Each provider supplies:
 - A **discovery adapter** (search) — converts a generic query into provider
   API calls, returns hits as a normalized record.
 - A **manifest resolver** — given a provider identifier (e.g. a Wellcome
-  b-number) or URL, return the manifest URL and fetch the manifest.
+  b-number) or URL, return either a manifest URL OR an in-memory
+  synthesized manifest payload (the `ManifestRef.manifest_payload` slot).
+  The latter is what the LoC adapter uses: LoC has no Presentation
+  manifest at a clean URL, so we synthesize one from `?fo=json`.
 - An **OCR strategy** — declares, per-canvas or per-manifest, where to find
-  text: `content_search`, `rendering_text`, `seealso_alto`,
-  `seealso_hocr`, `annotation_list`, or `none`.
+  text: `seealso_alto`, `seealso_text` (per-canvas plain text),
+  `content_search`, `rendering_text`, `seealso_hocr`, or `none`.
 - A **rendering strategy** — declares how to find PDF/EPUB/etc.
 
 ### Provider kinds
 
-For v1, all providers are kind `iiif` (Wellcome, generic IIIF, future
-Bodleian / Gallica / LoC). `index_metadata.provider_kind = "iiif"` is
-written into every index so a non-IIIF kind can be added later
-(`pdf` for sources like BIU Santé and Google Books, `url_set` for things
-like Bartleby's HTML Gray's, `ia` deferring to `ia-utils`) without
-breaking schema-aware consumers. See §10 for the deferred non-IIIF
-kinds — adding them is purely additive on top of the IIIF v1.
+For v1, all providers are kind `iiif`. `index_metadata.provider_kind`
+is written into every index so a non-IIIF kind can be added later
+(`pdf` for sources like BIU Santé and Google Books, `url_set` for
+Bartleby's HTML Gray's, `ia` deferring to `ia-utils`) without
+breaking schema-aware consumers.
+
+### Providers wired today
+
+| Key | Status | Manifest source | OCR sources handled | Discovery |
+|---|---|---|---|---|
+| `generic` | ✓ ships | URL passed by user (any IIIF v2 or v3 host) | canvas-level ALTO `seeAlso` (`text/xml` + `alto` profile); canvas-level plain text `seeAlso` (`text/plain`); whole-work plain-text rendering for `get-text` | none — user pastes a URL |
+| `wellcome` | ✓ ships | resolves b-number → `iiif.wellcomecollection.org/presentation/{b}` (v3) | per-canvas ALTO via `seeAlso` (verified ABBYY pipeline); no per-canvas plain text | `search-catalog` (Wellcome Catalogue v2 API) |
+| `loc` | ✓ ships | **synthesized** in memory from `loc.gov/item/{lccn}/?fo=json` (LoC has no Presentation manifest at a clean URL) | per-canvas ALTO when present (modern Tesseract 5.5 backfill); per-canvas plain text otherwise — Vesalius *Fabrica* is in this branch | not yet wired (catalog API exists, ~60 lines) |
+| MDZ (Munich Digitisation Centre) | image-only via `generic` | direct manifest URL `api.digitale-sammlungen.de/iiif/presentation/v2/{bsb_id}/manifest` | exposes **hOCR** (not ALTO) at `/ocr/{bsb_id}/{N}` — URL is **not** in the manifest, so generic provider misses it; full support needs an hOCR parser + URL injection adapter (~300 lines) | not wired |
+| Bodleian | image-only via `generic` | direct manifest URL | no per-canvas OCR on the manuscripts we sampled | not wired |
+
+The two v2-polymorphism robustness fixes (`rendering`/`seeAlso`
+entries as string-or-object, and `seeAlso` as single-dict-not-list)
+unlocked image-only support for all clean-IIIF-v2 hosts — Bodleian,
+MDZ, plus presumably Gallica, U Toronto, U Barcelona, ETH e-rara, and
+others. For each of those, the only thing standing between us and
+full FTS is the OCR-source story (provider-specific).
+
+### Per-canvas plain text as an OCR source
+
+`Canvas.text_url` records `seeAlso` entries with `format=text/plain`,
+parallel to `alto_url` for `text/xml`+`alto`. When ALTO is absent but
+plain text is present (LoC's older Tesseract output), `create-index`
+fetches the per-canvas text and writes one synthetic `text_blocks` row
+per canvas: `block_number=0`, `block_type='ocr_page'`, full text in
+`text`, all bbox/confidence/font fields NULL. FTS still works at
+page granularity; bbox queries and figure extraction don't.
+
+`index_metadata.ocr_source` distinguishes the four cases:
+`alto` | `text_plain` | `mixed` | `none`.
+
+### HTTP retry & rate-limit handling
+
+`fetch_bytes` and `fetch_many_bytes` retry on 429 + any 5xx (covering
+Cloudflare-specific 520-527 that LoC's edge emits under load) with
+exponential backoff, honoring `Retry-After` when set. Default 8
+retries, base 0.5 s. Per-provider config can override:
+
+- LoC: `max_concurrency = 2` (their edge starts rate-limiting around
+  8 concurrent text fetches)
+- Wellcome: default 8 (verified safe at 1564 ALTOs in parallel)
 
 ### 4.1 Tooling and project layout
 
@@ -1241,47 +1283,59 @@ sibling-Works enumeration, no non-IIIF provider kinds in v1.
    (Spalteholz) and `experiments/morris_index/`. Tooling: uv +
    hatchling + ruff + mypy --strict + pytest, all green.
 
-   **M1 gaps deferred:**
-   - `--split-on-range` for the Cunningham-Manual within-manifest
-     concatenation case (detection ships in M1; the per-range split
-     deferred to M1b).
-   - Fixture-based tests for `create-index` (currently only smoke
-     tests; full-pipeline tests need cached fixtures so they're
-     offline).
+   The schema decisions are grounded in `experiments/alto_vs_ia/`
+   (Spalteholz) and `experiments/morris_index/`. Tooling: uv +
+   hatchling + ruff + mypy --strict + pytest, all green.
 
-   **`searchtext` mode dropped from v1.** See §3.5 "Why one mode, not
-   two." For IIIF providers (unlike IA), per-canvas ALTO is the only
-   source of per-page text — once we've paid the fetch, keeping the
-   bboxes is free in network terms and unlocks the IIIF-only capabilities
-   in §1.
+2. **M2 — Wellcome adapter, full M1 commands.** ✓ shipped.
+   - b-number / work-id → manifest resolution
+   - 1564-canvas Morris Anatomy 1914 indexed end-to-end (10,691
+     TextBlocks, 1,278 illustrations, working femur figure extraction)
+   - Restricted-item path validated (text-only index, image fetch 401
+     correctly handled)
+   - Within-manifest concatenation detection via `ranges` table
+     (Cunningham Manual case). `--split-on-range` deferred — users can
+     query the table directly.
 
-   **Open design question (not blocking M1):** one-SQLite-per-work
-   (current) vs. a `library merge` rollup that combines many per-work
-   files into a single corpus-wide DB for cross-book FTS. Discussed
-   2026-05-11; deferred — the per-work primitive must be solid first.
+3. **M3 — Image-API + download polish.** ✓ shipped.
+   - `--region`, `--size`, `--rotation`, `--format` on `get-page`
+   - Asymmetric `--padding` (`left,top,right,bottom`, pixels + percent)
+   - Parallel `get-pages` with `--zip` and `--mosaic` (LLM-vision)
+   - `get-pdf` + `rebuild-index` + `get-text` (whole-work)
+   - `ocr-page` (local Tesseract, multi-language, multi-format,
+     server-side IIIF region crop)
 
-1a. **M1a — `searchtext` mode (lean fallback).** Add `--mode
-   searchtext` that drops bboxes and reconstructs per-page text from
-   ALTO `<String CONTENT>` joins. Same source files as M1, lighter
-   schema. **Do not use Wellcome's manifest-level `/text/v1/{bnumber}`
-   rendering for this** — it has no per-page boundaries (verified in
-   `morris_index`).
-2. **M2 — Wellcome adapter (single document).** `iiif-utils info b22396147`
-   resolves a Wellcome b-number to its manifest and produces a working
-   index. Content Search v1 + ALTO + plain-text OCR fallback chain
-   (per §6). Restricted-item path (text-only index, image fetch returns
-   401) handled. Within-manifest concatenation handled via the `ranges`
-   table and `--split-on-range`. **Sibling-Works multi-volume
-   enumeration is explicitly NOT in M2** — the user is expected to run
-   `create-index` once per b-number for now.
-3. **M3 — Image-API and download polish.** `--region`, `--size`,
-   `--rotation` on `get-page`; info.json caching; PDF rendering; parallel
-   `get-pages`; ZIP packaging.
-4. **M4 — Catalogue search.** `search-catalog` against Wellcome Catalogue
-   API. Returns a list of works with b-numbers; user picks one and runs
-   `create-index`. No sibling-Works auto-enumeration yet.
-5. **M5 — Second IIIF adapter (Bodleian or Gallica).** Validates the
-   provider abstraction. Still single-document.
+4. **M4 — Catalog search.** ✓ shipped for Wellcome (`search-catalog`,
+   alias `search-cat`). Works metadata, filter facets, pagination,
+   `--format json/jsonl/csv`. LoC `search-catalog` still pending
+   (~60 lines using their `?fo=json&q=...` endpoint).
 
-Anything past M5 (corpus driver, non-IIIF kinds, sibling enumeration,
-Change Discovery) lives in §10 until M1–M5 prove stable.
+5. **M5 — Second IIIF adapter (LoC).** ✓ shipped.
+   - `loc` provider synthesizes IIIF v2 from `loc.gov/item/{lccn}/?fo=json`
+   - Per-canvas ALTO when present (modern Tesseract 5.5 backfill);
+     per-canvas plain-text fallback when not
+   - Vesalius *De humani corporis fabrica* 1543 fully indexed (733
+     canvases, 726 text_blocks, FTS over real Latin)
+   - 429/5xx retry with exponential backoff (handles LoC's
+     Cloudflare-emitted 520-527s and 429 rate limits)
+   - Per-provider concurrency override (LoC capped at 2)
+   - Three v2-polymorphism robustness fixes in the generic parser
+     (`rendering` str-or-object, `seeAlso` str-or-object,
+     `seeAlso` single-dict-not-list) — Bodleian and MDZ now work
+     image-only through the generic provider too.
+
+**Polish items still open:**
+- `--split-on-range` (Cunningham 2-vol-in-one case)
+- Fixture-based tests for `create-index` (currently smoke + unit only)
+- LoC `search-catalog` adapter
+- info.json caching (we still hardcode `--size` aliases instead of
+  consulting per-image metadata)
+
+**Deferred to v1.5+:**
+- MDZ full FTS adapter (hOCR parser + URL-injection provider, ~300 lines)
+- Gallica adapter
+- `library merge` cross-book corpus rollup
+- Non-IIIF provider kinds (`pdf` for BIU Santé; `url_set` for Bartleby
+  Gray's; `ia` deferring to `ia-utils`)
+- Corpus driver / `corpus-run --from corpus.toml`
+- Skill file port
