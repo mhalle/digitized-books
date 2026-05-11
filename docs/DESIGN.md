@@ -647,7 +647,7 @@ src/iiif_utils/
         get_url.py
         ocr_page.py
         rebuild_index.py
-        search_iiif.py       # equivalent of search_ia
+        search_catalog.py       # equivalent of search_ia
         search_index.py
     utils/
         slug.py
@@ -750,7 +750,7 @@ transfer. Provider selection is via `--provider/-P`, defaulting to
 `default_provider` from config.
 
 ```
-iiif-utils search-iiif    # discovery (analog of ia-utils search-ia)
+iiif-utils search-catalog    # discovery (analog of ia-utils search-ia)
 iiif-utils info
 iiif-utils list-files
 iiif-utils create-index
@@ -772,7 +772,7 @@ iiif-utils providers      # list/inspect configured providers
 
 ```bash
 # Search Wellcome
-iiif-utils search-iiif -q "anatomy atlas" --year 1800-1900 --has-ocr
+iiif-utils search-catalog -q "anatomy atlas" --year 1800-1900 --has-ocr
 
 # Index a Wellcome work by b-number
 iiif-utils create-index b31362138 -d ./indexes/
@@ -781,7 +781,7 @@ iiif-utils create-index b31362138 -d ./indexes/
 iiif-utils create-index https://digital.bodleian.ox.ac.uk/iiif/manifest/...
 
 # Switch provider explicitly
-iiif-utils -P gallica search-iiif -q "anatomie" --year -1900
+iiif-utils -P gallica search-catalog -q "anatomie" --year -1900
 
 # Image API niceties (only useful in IIIF land)
 iiif-utils get-page -i index.sqlite -l 42 --size 'full' --format jpg
@@ -1277,7 +1277,7 @@ sibling-Works enumeration, no non-IIIF provider kinds in v1.
 3. **M3 — Image-API and download polish.** `--region`, `--size`,
    `--rotation` on `get-page`; info.json caching; PDF rendering; parallel
    `get-pages`; ZIP packaging.
-4. **M4 — Catalogue search.** `search-iiif` against Wellcome Catalogue
+4. **M4 — Catalogue search.** `search-catalog` against Wellcome Catalogue
    API. Returns a list of works with b-numbers; user picks one and runs
    `create-index`. No sibling-Works auto-enumeration yet.
 5. **M5 — Second IIIF adapter (Bodleian or Gallica).** Validates the

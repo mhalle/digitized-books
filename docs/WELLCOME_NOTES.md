@@ -622,7 +622,7 @@ Concrete bullet-point updates the design doc needs:
   come back empty unless explicitly requested via `include=`. The
   Wellcome adapter should always send
   `include=items,identifiers,subjects,contributors,production,languages,genres,parts,partOf`
-  for `search-iiif`.
+  for `search-catalog`.
 - **Two identifier spaces.** `document_metadata` should store **both**
   the catalogue work ID and the b-number, plus emit a `homepage` of
   `https://wellcomecollection.org/works/{workId}` for the `--viewer`

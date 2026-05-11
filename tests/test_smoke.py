@@ -18,10 +18,21 @@ def test_cli_help_lists_commands():
     r = CliRunner().invoke(cli, ["--help"])
     assert r.exit_code == 0
     for cmd in ("info", "list-files", "create-index", "rebuild-index",
-                 "search-index", "get-page", "get-pages", "get-pdf",
+                 "search-catalog", "search-cat", "search-index",
+                 "get-page", "get-pages", "get-pdf",
                  "get-figure", "get-region", "get-text", "get-url",
                  "list-figures"):
         assert cmd in r.output
+
+
+def test_search_catalog_alias_works():
+    """search-cat must reach the same handler as search-catalog."""
+    r1 = CliRunner().invoke(cli, ["search-catalog", "--help"])
+    r2 = CliRunner().invoke(cli, ["search-cat", "--help"])
+    assert r1.exit_code == 0 and r2.exit_code == 0
+    # Both --help outputs describe the same options
+    assert "--year" in r1.output and "--year" in r2.output
+    assert "--has-iiif" in r1.output and "--has-iiif" in r2.output
 
 
 def test_book_page_normalization():
@@ -179,6 +190,16 @@ MINIMAL_ALTO = b"""<?xml version='1.0'?>
     </Page>
   </Layout>
 </alto>"""
+
+
+def test_parse_year_spec():
+    from iiif_utils.commands.search_catalog import _parse_year
+    # Single year → Jan 1 / Dec 31
+    assert _parse_year("1914") == ("1914-01-01", "1914-12-31")
+    assert _parse_year("1900-1950") == ("1900-01-01", "1950-12-31")
+    assert _parse_year("1900-") == ("1900-01-01", None)
+    assert _parse_year("-1950") == (None, "1950-12-31")
+    assert _parse_year("") == (None, None)
 
 
 def test_parse_leaf_range():

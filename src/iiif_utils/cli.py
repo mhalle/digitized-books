@@ -16,6 +16,7 @@ from iiif_utils.commands.info import info
 from iiif_utils.commands.list_figures import list_figures
 from iiif_utils.commands.list_files import list_files
 from iiif_utils.commands.rebuild_index import rebuild_index
+from iiif_utils.commands.search_catalog import search_catalog
 from iiif_utils.commands.search_index import search_index
 
 
@@ -41,6 +42,8 @@ cli.add_command(info)
 cli.add_command(list_files)
 cli.add_command(create_index)
 cli.add_command(rebuild_index)
+cli.add_command(search_catalog)
+cli.add_command(search_catalog, name="search-cat")  # alias
 cli.add_command(search_index)
 cli.add_command(get_page)
 cli.add_command(get_pages)

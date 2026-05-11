@@ -18,7 +18,12 @@ def cache_path(cache_dir: Path, url: str, suffix: str = "") -> Path:
 
 def fetch_json(url: str, *, cfg_http: dict[str, Any],
                cache_dir: Path | None = None) -> dict[str, Any]:
-    """Sync JSON fetch with optional file cache. Idempotent."""
+    """Sync JSON fetch with optional file cache. Idempotent.
+
+    On HTTP error, augments the exception with the response body — IIIF
+    providers (Wellcome especially) return a JSON `description` field
+    that pinpoints which parameter is wrong.
+    """
     if cache_dir is not None:
         cp = cache_path(cache_dir, url, ".json")
         if cp.exists():
@@ -29,7 +34,19 @@ def fetch_json(url: str, *, cfg_http: dict[str, Any],
     with httpx.Client(timeout=timeout, follow_redirects=True,
                       headers=headers) as client:
         r = client.get(url)
-        r.raise_for_status()
+        if r.is_error:
+            detail = ""
+            try:
+                err = r.json()
+                if isinstance(err, dict):
+                    detail = err.get("description") or err.get("error") or ""
+            except Exception:
+                detail = r.text[:200]
+            raise httpx.HTTPStatusError(
+                f"HTTP {r.status_code} for {url}"
+                + (f" — {detail}" if detail else ""),
+                request=r.request, response=r,
+            )
         body = r.json()
     if cache_dir is not None:
         import json
