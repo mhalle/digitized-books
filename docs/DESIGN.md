@@ -524,18 +524,24 @@ breaking schema-aware consumers.
 
 | Key | Status | Manifest source | OCR sources handled | Discovery |
 |---|---|---|---|---|
-| `generic` | ✓ ships | URL passed by user (any IIIF v2 or v3 host) | canvas-level ALTO `seeAlso` (`text/xml` + `alto` profile); canvas-level plain text `seeAlso` (`text/plain`); whole-work plain-text rendering for `get-text` | none — user pastes a URL |
-| `wellcome` | ✓ ships | resolves b-number → `iiif.wellcomecollection.org/presentation/{b}` (v3) | per-canvas ALTO via `seeAlso` (verified ABBYY pipeline); no per-canvas plain text | `search-catalog` (Wellcome Catalogue v2 API) |
-| `loc` | ✓ ships | **synthesized** in memory from `loc.gov/item/{lccn}/?fo=json` (LoC has no Presentation manifest at a clean URL) | per-canvas ALTO when present (modern Tesseract 5.5 backfill); per-canvas plain text otherwise — Vesalius *Fabrica* is in this branch | not yet wired (catalog API exists, ~60 lines) |
-| MDZ (Munich Digitisation Centre) | image-only via `generic` | direct manifest URL `api.digitale-sammlungen.de/iiif/presentation/v2/{bsb_id}/manifest` | exposes **hOCR** (not ALTO) at `/ocr/{bsb_id}/{N}` — URL is **not** in the manifest, so generic provider misses it; full support needs an hOCR parser + URL injection adapter (~300 lines) | not wired |
-| Bodleian | image-only via `generic` | direct manifest URL | no per-canvas OCR on the manuscripts we sampled | not wired |
+| `generic` | ✓ ships | URL passed by user (any IIIF v2 or v3 host) | canvas-level ALTO `seeAlso` (`text/xml` + `alto` profile); canvas-level hOCR `seeAlso` (`text/vnd.hocr+html` or profile contains `hocr`); canvas-level plain text `seeAlso` (`text/plain`); whole-work plain-text rendering for `get-text` | none — user pastes a URL |
+| `wellcome` | ✓ ships | resolves b-number → `iiif.wellcomecollection.org/presentation/{b}` (v3) | per-canvas ALTO via `seeAlso` (verified ABBYY pipeline) | `search-catalog -P wellcome` (Wellcome Catalogue v2 API) |
+| `loc` | ✓ ships | **synthesized** in memory from `loc.gov/item/{lccn}/?fo=json` (LoC has no Presentation manifest at a clean URL) | per-canvas ALTO when present (modern Tesseract 5.5 backfill); per-canvas plain text otherwise — Vesalius *Fabrica* (LCCN 49043519, 733 canvases) indexes via this branch | `search-catalog -P loc` (loc.gov search?fo=json) |
+| `mdz` (Munich Digitisation Centre) | ✓ ships | direct manifest URL or BSB id; adapter **injects** per-canvas hOCR seeAlso pointing at `/ocr/{bsb_id}/{N}` (URL is **not** in the manifest itself) | per-canvas **hOCR** parsed by `core/hocr.py` (lxml, ocrx_block granularity) | not wired |
+| `bodleian` | image-only via `generic` | direct manifest URL | no per-canvas OCR on the manuscripts we sampled | not wired |
+| **`gallica` (BnF)** | **deferred** — image-only works via `generic` (just pass the manifest URL), but full FTS blocked | manifest + IIIF Image API reachable; OCR (`.texteBrut`, `.alto`) **gated behind a security challenge** ("Vérification de sécurité") from non-FR networks; SRU search reachable | not wired |
+| **BIU Santé Paris / Numerabilis** | deferred — non-IIIF | PDFs only at `numerabilis.u-paris.fr/.../pdf/livre{N}.pdf` (the Vesalius 1543 critical edition with Latin transcription + French translation) | would need a `pdf` provider kind (see §10) | not wired |
+| (untested) U Toronto, U Barcelona, ETH e-rara | clean IIIF v2 expected to work via `generic` | per prior research notes | TBD — likely OCR via `seeAlso` if they expose it | not wired |
 
-The two v2-polymorphism robustness fixes (`rendering`/`seeAlso`
-entries as string-or-object, and `seeAlso` as single-dict-not-list)
-unlocked image-only support for all clean-IIIF-v2 hosts — Bodleian,
-MDZ, plus presumably Gallica, U Toronto, U Barcelona, ETH e-rara, and
-others. For each of those, the only thing standing between us and
-full FTS is the OCR-source story (provider-specific).
+The three v2-polymorphism robustness fixes (`rendering` str-or-object,
+`seeAlso` str-or-object, `seeAlso` single-dict-not-list) unlocked
+image-only support for any clean-IIIF-v2 host via the generic
+provider. For each non-wired host, the only thing standing between us
+and full FTS is the OCR-source story (provider-specific). Gallica is
+the awkward case where the OCR exists at known parallel URLs but
+isn't fetchable from arbitrary networks — defer until either a
+non-gated network is available or someone needs Gallica enough to
+write a challenge-response client.
 
 ### Per-canvas plain text as an OCR source
 
@@ -1324,18 +1330,36 @@ sibling-Works enumeration, no non-IIIF provider kinds in v1.
      `seeAlso` single-dict-not-list) — Bodleian and MDZ now work
      image-only through the generic provider too.
 
+**Shipped after the initial M1–M5 push (May 2026):**
+- ✓ `info.json` caching + `get-info` command; `--padding` clamp
+  consults info.json when stored dims are placeholder
+- ✓ LoC `search-catalog -P loc` (loc.gov/search?fo=json; ~18k anatomy
+  hits faceted by date / language / subject)
+- ✓ **MDZ full FTS adapter** — `core/hocr.py` (lxml hOCR parser) +
+  `providers/mdz.py` (BSB resolver + canvas-seeAlso injection for
+  `/ocr/{bsb_id}/{N}`). 138-canvas BSB validation passes.
+  Three real providers now wired: Wellcome, LoC, MDZ.
+
 **Polish items still open:**
 - `--split-on-range` (Cunningham 2-vol-in-one case)
 - Fixture-based tests for `create-index` (currently smoke + unit only)
-- LoC `search-catalog` adapter
-- info.json caching (we still hardcode `--size` aliases instead of
-  consulting per-image metadata)
 
-**Deferred to v1.5+:**
-- MDZ full FTS adapter (hOCR parser + URL-injection provider, ~300 lines)
-- Gallica adapter
-- `library merge` cross-book corpus rollup
-- Non-IIIF provider kinds (`pdf` for BIU Santé; `url_set` for Bartleby
-  Gray's; `ia` deferring to `ia-utils`)
-- Corpus driver / `corpus-run --from corpus.toml`
-- Skill file port
+**Deferred:**
+- **Gallica adapter** — OCR endpoints (`.texteBrut`, `.alto`) gated
+  behind a security challenge from non-FR networks; manifests + IIIF
+  Image + SRU search work. Defer until either non-gated network access
+  or a concrete French-corpus need. Image-only indexing works today
+  via generic provider.
+- **`library merge`** cross-book corpus rollup (one SQLite holding
+  many works for cross-work FTS). Discussed 2026-05-11; deferred until
+  per-work primitive proves stable in real use.
+- **Non-IIIF provider kinds**: `pdf` (BIU Santé / Numerabilis Vesalius
+  critical edition, Google Books); `url_set` (Bartleby Gray's); `ia`
+  (deferring to `ia-utils`).
+- **Corpus driver** / `corpus-run --from corpus.toml` for batch ingest
+  of curated reading lists (`CORPUS.md` is the worked example).
+- **Skill file port** from `ia-utils/SKILL.md`.
+- **NLM full FTS adapter** — has IIIF v2 + Image API at clean URLs;
+  full-work plain text at `/ocr/{PID}` (no per-page boundaries). Index
+  works image-only via generic; per-page FTS would need either an
+  alignment heuristic or coordinate with NLM about per-page text URLs.
