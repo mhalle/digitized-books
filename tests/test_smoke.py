@@ -66,6 +66,32 @@ def test_padded_bbox_pct():
     assert out == (90, 80, 210, 320)  # 10px x, 20px y
 
 
+def test_padded_bbox_four_value_pixels():
+    # bbox = (100, 100, 200, 300), w=100, h=200
+    # padding = left=10, top=20, right=30, bottom=40
+    out = image_api.padded_bbox((100, 100, 200, 300), "10,20,30,40")
+    assert out == (90, 80, 230, 340)
+
+
+def test_padded_bbox_four_value_mixed_pct():
+    # left=10%×100=10, top=10%×200=20, right=5%×100=5, bottom=5%×200=10
+    out = image_api.padded_bbox((100, 100, 200, 300), "10%,10%,5%,5%")
+    assert out == (90, 80, 205, 310)
+
+
+def test_padded_bbox_four_value_clamps():
+    # Symmetric 50px asymmetric clamped to a tight 210x210 canvas
+    out = image_api.padded_bbox((100, 100, 200, 200), "50,50,50,50",
+                                  canvas_w=210, canvas_h=210)
+    assert out == (50, 50, 210, 210)
+
+
+def test_padded_bbox_invalid_count_raises():
+    import pytest
+    with pytest.raises(ValueError):
+        image_api.padded_bbox((0, 0, 100, 100), "10,20,30")  # 3 values
+
+
 def test_clamp_dims_prefers_image_dims():
     # When both available, image-native (ALTO Page) wins over canvas dims
     row = {"image_width": 1820, "image_height": 2938,

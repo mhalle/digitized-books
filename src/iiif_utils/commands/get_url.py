@@ -25,7 +25,8 @@ from iiif_utils.core import image_api
               help="IIIF size string (default 'full'). Aliases: small,medium,large.")
 @click.option("--format", "fmt", default="jpg")
 @click.option("--padding", default=None,
-              help="With --figure or --region: int px or '5%'.")
+              help="Pad the bbox (with --figure or --region). Symmetric: "
+                   "'20' or '5%'. Per-side: 'left,top,right,bottom'.")
 # Mode flags — exactly one of:
 @click.option("--image", "mode", flag_value="image", default="image",
               help="Whole-canvas image URL (default).")

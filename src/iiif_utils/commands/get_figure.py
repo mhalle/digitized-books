@@ -23,7 +23,9 @@ from iiif_utils.core import image_api
               default=None,
               help="Output file path. Default: figure_lN_nM.jpg in cwd.")
 @click.option("--padding", default=None,
-              help="Padding for the crop: int pixels or '5%'.")
+              help="Pad the crop. Symmetric: '20' or '5%'. "
+                   "Per-side: 'left,top,right,bottom' (px and/or %), "
+                   "e.g. '20,40,20,40' or '5%,10%,5%,10%'.")
 @click.option("--size", default="1400,",
               help="IIIF size string (default '1400,').")
 @click.option("--format", "fmt", default="jpg",

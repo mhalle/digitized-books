@@ -19,7 +19,8 @@ from iiif_utils.utils import output as output_
 @click.option("--all", "all_pages", is_flag=True, default=False,
               help="List every illustration in the index.")
 @click.option("--padding", default=None,
-              help="Padding for region URL: int pixels or '5%'.")
+              help="Pad the bboxes in emitted region URLs. Symmetric: "
+                   "'20' or '5%'. Per-side: 'left,top,right,bottom'.")
 @click.option("--size", default="1400,",
               help="IIIF size string (default: '1400,').")
 @output_.format_option(default="table")
