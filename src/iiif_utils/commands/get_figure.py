@@ -45,7 +45,8 @@ def get_figure(index: Path, leaf_num: int, ill_num: int,
     row = conn.execute("""
         SELECT
             i.bbox_x0, i.bbox_y0, i.bbox_x1, i.bbox_y1,
-            pn.image_service_url, pn.width AS canvas_w, pn.height AS canvas_h
+            pn.image_service_url,
+            pn.width, pn.height, pn.image_width, pn.image_height
         FROM illustrations i
         JOIN page_numbers pn ON pn.leaf_num = i.page_id
         WHERE i.page_id = ? AND i.illustration_number = ?
@@ -62,9 +63,8 @@ def get_figure(index: Path, leaf_num: int, ill_num: int,
 
     bbox = (row["bbox_x0"], row["bbox_y0"], row["bbox_x1"], row["bbox_y1"])
     if padding:
-        bbox = image_api.padded_bbox(bbox, padding,
-                                       canvas_w=row["canvas_w"],
-                                       canvas_h=row["canvas_h"])
+        cw, ch = image_api.clamp_dims_from_page_row(row)
+        bbox = image_api.padded_bbox(bbox, padding, canvas_w=cw, canvas_h=ch)
     url = image_api.region_url(row["image_service_url"], bbox,
                                  size=size, fmt=fmt)
 

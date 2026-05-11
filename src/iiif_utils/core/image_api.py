@@ -4,6 +4,27 @@ Format: {service}/{region}/{size}/{rotation}/{quality}.{format}
 """
 from __future__ import annotations
 
+from typing import Any, Mapping
+
+
+def clamp_dims_from_page_row(
+    row: Mapping[str, Any],
+) -> tuple[int | None, int | None]:
+    """Pick the right (canvas_w, canvas_h) for `padded_bbox` clamping.
+
+    ALTO bboxes are in the image-native coordinate space recorded in
+    `page_numbers.image_width/image_height` (from the ALTO `<Page>`
+    element). The manifest's `width`/`height` are canvas dims and are
+    slightly different — wrong for clamping. Prefer image dims, fall
+    back to canvas dims.
+    """
+    iw = row["image_width"] if "image_width" in row.keys() else None
+    ih = row["image_height"] if "image_height" in row.keys() else None
+    if iw and ih:
+        return iw, ih
+    return row["width"] if "width" in row.keys() else None, \
+           row["height"] if "height" in row.keys() else None
+
 
 def region_url(
     service_url: str,

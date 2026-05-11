@@ -72,7 +72,8 @@ def get_url(index: Path, leaf_num: int | None, ill_num: int | None,
         raise click.UsageError(f"--{mode} requires -l / --leaf.")
 
     pn = conn.execute(
-        "SELECT image_service_url, width, height FROM page_numbers "
+        "SELECT image_service_url, width, height, "
+        "image_width, image_height FROM page_numbers "
         "WHERE leaf_num = ?", (leaf_num,)
     ).fetchone()
     if not pn or not pn["image_service_url"]:
@@ -80,6 +81,7 @@ def get_url(index: Path, leaf_num: int | None, ill_num: int | None,
             f"Canvas {leaf_num} has no image_service_url."
         )
     service = pn["image_service_url"]
+    clamp_w, clamp_h = image_api.clamp_dims_from_page_row(pn)
 
     if mode == "info":
         click.echo(image_api.info_json_url(service))
@@ -104,8 +106,8 @@ def get_url(index: Path, leaf_num: int | None, ill_num: int | None,
         bbox = (ill["bbox_x0"], ill["bbox_y0"], ill["bbox_x1"], ill["bbox_y1"])
         if padding:
             bbox = image_api.padded_bbox(bbox, padding,
-                                          canvas_w=pn["width"],
-                                          canvas_h=pn["height"])
+                                          canvas_w=clamp_w,
+                                          canvas_h=clamp_h)
         click.echo(image_api.region_url(service, bbox, size=size, fmt=fmt))
         return
 
@@ -121,7 +123,7 @@ def get_url(index: Path, leaf_num: int | None, ill_num: int | None,
             raise click.UsageError(f"--bbox parse error: {e}") from e
         if padding:
             bbox = image_api.padded_bbox(bbox, padding,
-                                          canvas_w=pn["width"],
-                                          canvas_h=pn["height"])
+                                          canvas_w=clamp_w,
+                                          canvas_h=clamp_h)
         click.echo(image_api.region_url(service, bbox, size=size, fmt=fmt))
         return

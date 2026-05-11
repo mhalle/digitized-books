@@ -66,6 +66,19 @@ def test_padded_bbox_pct():
     assert out == (90, 80, 210, 320)  # 10px x, 20px y
 
 
+def test_clamp_dims_prefers_image_dims():
+    # When both available, image-native (ALTO Page) wins over canvas dims
+    row = {"image_width": 1820, "image_height": 2938,
+           "width": 1731, "height": 2903}
+    assert image_api.clamp_dims_from_page_row(row) == (1820, 2938)
+
+
+def test_clamp_dims_falls_back_to_canvas_dims():
+    row = {"image_width": None, "image_height": None,
+           "width": 1731, "height": 2903}
+    assert image_api.clamp_dims_from_page_row(row) == (1731, 2903)
+
+
 MINIMAL_ALTO = b"""<?xml version='1.0'?>
 <alto xmlns="http://www.loc.gov/standards/alto/ns-v2#">
   <Description><MeasurementUnit>pixel</MeasurementUnit></Description>

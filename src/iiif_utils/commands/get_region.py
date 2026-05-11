@@ -43,7 +43,8 @@ def get_region(index: Path, leaf_num: int, bbox_str: str,
     conn = sqlite3.connect(f"file:{index}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     row = conn.execute(
-        "SELECT image_service_url, width, height FROM page_numbers "
+        "SELECT image_service_url, width, height, "
+        "image_width, image_height FROM page_numbers "
         "WHERE leaf_num = ?", (leaf_num,)
     ).fetchone()
     if not row or not row["image_service_url"]:
@@ -52,9 +53,9 @@ def get_region(index: Path, leaf_num: int, bbox_str: str,
         )
 
     if padding:
+        cw, ch = image_api.clamp_dims_from_page_row(row)
         bbox = image_api.padded_bbox(bbox, padding,  # type: ignore[arg-type]
-                                       canvas_w=row["width"],
-                                       canvas_h=row["height"])
+                                       canvas_w=cw, canvas_h=ch)
     url = image_api.region_url(row["image_service_url"],
                                  bbox, size=size, fmt=fmt)  # type: ignore[arg-type]
 

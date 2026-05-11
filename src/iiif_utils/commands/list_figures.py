@@ -36,7 +36,7 @@ def list_figures(index: Path, leaf_num: int | None, all_pages: bool,
             i.bbox_x0, i.bbox_y0, i.bbox_x1, i.bbox_y1,
             pn.book_page_number,
             pn.image_service_url,
-            pn.width AS canvas_w, pn.height AS canvas_h
+            pn.width, pn.height, pn.image_width, pn.image_height
         FROM illustrations i
         JOIN page_numbers pn ON pn.leaf_num = i.page_id
     """
@@ -60,9 +60,8 @@ def list_figures(index: Path, leaf_num: int | None, all_pages: bool,
             continue
         bbox = (r["bbox_x0"], r["bbox_y0"], r["bbox_x1"], r["bbox_y1"])
         if pad_val is not None:
-            bbox = image_api.padded_bbox(bbox, pad_val,
-                                           canvas_w=r["canvas_w"],
-                                           canvas_h=r["canvas_h"])
+            cw, ch = image_api.clamp_dims_from_page_row(r)
+            bbox = image_api.padded_bbox(bbox, pad_val, canvas_w=cw, canvas_h=ch)
         url = image_api.region_url(r["image_service_url"], bbox, size=size)
         pn = r["book_page_number"] or "—"
         click.echo(f"canvas {r['page_id']:>4} (p.{pn}) #{r['illustration_number']}"

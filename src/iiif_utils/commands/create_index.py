@@ -145,9 +145,19 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
         })
     db_mod.write_archive_files(db, af_rows)
 
+    # --- ALTO parse first (so page_numbers can carry image-native dims) ----
+    tb_rows: list[dict[str, Any]] = []
+    il_rows: list[dict[str, Any]] = []
+    image_dims: dict[int, tuple[int, int]] = {}
+    if canvases:
+        tb_rows, il_rows, image_dims = _parse_altos(
+            canvases, cfg_http=cfg_http, cache_dir=cache_dir, log=log,
+        )
+
     # --- page_numbers ------------------------------------------------------
     pn_rows: list[dict[str, Any]] = []
     for c in canvases:
+        img_dim = image_dims.get(c.index)
         pn_rows.append({
             "leaf_num": c.index,
             "book_page_number": db_mod.book_page_from_label(c.label),
@@ -159,16 +169,18 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
             "image_id": c.image_id,
             "image_service_url": c.image_service_url,
             "image_api_version": c.image_api_version,
-            "width": c.width,
+            "width": c.width,                # manifest canvas dims
             "height": c.height,
+            "image_width": img_dim[0] if img_dim else None,   # ALTO Page dims
+            "image_height": img_dim[1] if img_dim else None,  # = native image
         })
     if pn_rows:
         db_mod.write_page_numbers(db, pn_rows)
 
-    # --- text_blocks + illustrations from ALTO ------------------------------
-    if canvases:
-        _index_alto(db, canvases, cfg_http=cfg_http, cache_dir=cache_dir,
-                     log=log)
+    if tb_rows:
+        db_mod.write_text_blocks(db, tb_rows)
+    if il_rows:
+        db_mod.write_illustrations(db, il_rows)
 
     # --- ranges ------------------------------------------------------------
     range_entries = manifest_mod.ranges(manifest)
@@ -212,9 +224,26 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
     click.echo(f"  illustrations: {n_illus:,}")
 
 
-def _index_alto(db: Any, canvases: list[Any], *, cfg_http: dict[str, Any],
-                 cache_dir: Path, log: Logger) -> None:
-    """Fetch + parse per-canvas ALTO; write text_blocks + illustrations."""
+def _parse_altos(canvases: list[Any], *, cfg_http: dict[str, Any],
+                  cache_dir: Path, log: Logger,
+                  ) -> tuple[list[dict[str, Any]],
+                             list[dict[str, Any]],
+                             dict[int, tuple[int, int]]]:
+    """Fetch + parse per-canvas ALTO.
+
+    Returns (text_blocks rows, illustrations rows, {canvas_index:
+    (image_width, image_height)}).
+
+    `image_width`/`image_height` come from the ALTO `<Page>` element,
+    which we've verified matches the IIIF Image API's native source
+    dimensions (and the coordinate space ALTO bboxes are in). The
+    manifest canvas `width`/`height` are slightly different and not
+    suitable for clamping bboxes.
+    """
+    image_dims: dict[int, tuple[int, int]] = {}
+    tb_rows: list[dict[str, Any]] = []
+    il_rows: list[dict[str, Any]] = []
+
     alto_dir = cache_dir / "alto"
     alto_dir.mkdir(parents=True, exist_ok=True)
 
@@ -222,15 +251,13 @@ def _index_alto(db: Any, canvases: list[Any], *, cfg_http: dict[str, Any],
     log.info(f"fetching {len(alto_canvases)} ALTO files "
              f"(of {len(canvases)} canvases)")
     if not alto_canvases:
-        return
+        return tb_rows, il_rows, image_dims
 
     urls = [c.alto_url for c in alto_canvases]
     fetched = asyncio.run(http_.fetch_many_bytes(
         urls, cfg_http=cfg_http, cache_dir=alto_dir, suffix=".alto.xml",
     ))
 
-    tb_rows: list[dict[str, Any]] = []
-    il_rows: list[dict[str, Any]] = []
     n_parsed = 0
     for c in alto_canvases:
         content = fetched.get(c.alto_url)
@@ -243,6 +270,8 @@ def _index_alto(db: Any, canvases: list[Any], *, cfg_http: dict[str, Any],
             log.warn(f"parse error canvas {c.index}: {e}")
             continue
         n_parsed += 1
+        if page.page_w and page.page_h:
+            image_dims[c.index] = (page.page_w, page.page_h)
         for b in page.text_blocks:
             tb_rows.append({
                 "page_id": c.index,
@@ -271,5 +300,4 @@ def _index_alto(db: Any, canvases: list[Any], *, cfg_http: dict[str, Any],
                 "alto_id": ill.alto_id,
             })
     log.info(f"parsed {n_parsed} ALTOs")
-    db_mod.write_text_blocks(db, tb_rows)
-    db_mod.write_illustrations(db, il_rows)
+    return tb_rows, il_rows, image_dims
