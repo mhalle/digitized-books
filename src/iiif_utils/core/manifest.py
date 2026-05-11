@@ -127,14 +127,25 @@ def _image_service_v2(canvas: dict[str, Any]) -> tuple[str | None, str | None, s
     return None, None, None
 
 
-def _alto_seealso(canvas: dict[str, Any]) -> str | None:
-    """Return canvas-level seeAlso URL with format=text/xml and profile ~alto.
+def _seealso_entries(canvas: dict[str, Any]) -> list[dict[str, Any]]:
+    """Normalize a canvas's `seeAlso` to a list of dicts.
 
-    Defensive against v2 manifests that allow bare-string seeAlso entries.
+    v2 allowed three shapes: a single dict, a list of dicts, or a list
+    of strings. v3 standardized on a list of dicts. We normalize.
     """
-    for s in canvas.get("seeAlso", []) or []:
-        if not isinstance(s, dict):
-            continue
+    sa = canvas.get("seeAlso")
+    if sa is None:
+        return []
+    if isinstance(sa, dict):
+        return [sa]
+    if isinstance(sa, list):
+        return [s for s in sa if isinstance(s, dict)]
+    return []
+
+
+def _alto_seealso(canvas: dict[str, Any]) -> str | None:
+    """Return canvas-level seeAlso URL with format=text/xml and profile ~alto."""
+    for s in _seealso_entries(canvas):
         fmt = (s.get("format") or "").lower()
         prof_raw = s.get("profile") or ""
         prof = " ".join(prof_raw) if isinstance(prof_raw, list) else str(prof_raw)
@@ -151,9 +162,7 @@ def _text_seealso(canvas: dict[str, Any]) -> str | None:
     Used as an OCR fallback when ALTO is not present per-canvas
     (e.g. LoC items expose `.txt` per page but not `.alto.xml`).
     """
-    for s in canvas.get("seeAlso", []) or []:
-        if not isinstance(s, dict):
-            continue
+    for s in _seealso_entries(canvas):
         fmt = (s.get("format") or "").lower()
         if fmt == "text/plain":
             url = s.get("id") or s.get("@id")

@@ -46,6 +46,23 @@ def test_create_mosaic_tiny():
     assert im.size == (200, 150)
 
 
+def test_seealso_polymorphism():
+    """v2 allowed seeAlso to be a single dict, a list of dicts, or strings."""
+    from iiif_utils.core.manifest import _alto_seealso
+    alto_obj = {"@id": "https://x/page.alto.xml", "format": "text/xml",
+                 "profile": "http://www.loc.gov/standards/alto/v3/alto.xsd"}
+    # case 1: list of dicts (Wellcome)
+    assert _alto_seealso({"seeAlso": [alto_obj]}) == "https://x/page.alto.xml"
+    # case 2: single dict (MDZ-style)
+    assert _alto_seealso({"seeAlso": alto_obj}) == "https://x/page.alto.xml"
+    # case 3: list with non-ALTO entries — return None
+    other = {"@id": "https://x/meta.xml", "format": "text/xml",
+              "profile": "dublin-core"}
+    assert _alto_seealso({"seeAlso": [other]}) is None
+    # case 4: missing
+    assert _alto_seealso({}) is None
+
+
 def test_loc_lccn_recognizer():
     from iiif_utils.providers.loc import looks_like_lccn, parse_ref
     assert looks_like_lccn("49043519")
