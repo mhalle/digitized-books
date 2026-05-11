@@ -58,22 +58,43 @@ def fetch_json(url: str, *, cfg_http: dict[str, Any],
 def fetch_bytes(url: str, *, cfg_http: dict[str, Any],
                 cache_dir: Path | None = None,
                 suffix: str = "") -> bytes:
-    """Sync bytes fetch with optional file cache."""
+    """Sync bytes fetch with optional file cache and 429/5xx retry."""
     if cache_dir is not None:
         cp = cache_path(cache_dir, url, suffix)
         if cp.exists() and cp.stat().st_size > 0:
             return cp.read_bytes()
     headers = {"User-Agent": cfg_http.get("user_agent", "iiif-utils/0.1")}
     timeout = httpx.Timeout(float(cfg_http.get("timeout_seconds", 60)))
+    max_retries = int(cfg_http.get("max_retries", 8))
+    base_backoff = float(cfg_http.get("retry_base_seconds", 0.5))
+    import time
     with httpx.Client(timeout=timeout, follow_redirects=True,
                       headers=headers) as client:
-        r = client.get(url)
-        r.raise_for_status()
-        content = r.content
-    if cache_dir is not None:
-        cp = cache_path(cache_dir, url, suffix)
-        cp.write_bytes(content)
-    return content
+        for attempt in range(max_retries + 1):
+            try:
+                r = client.get(url)
+            except (httpx.RemoteProtocolError, httpx.ReadError,
+                     httpx.ConnectError):
+                if attempt == max_retries:
+                    raise
+                time.sleep(base_backoff * (2 ** attempt))
+                continue
+            if r.status_code == 429 or 500 <= r.status_code < 600:
+                ra = r.headers.get("retry-after")
+                delay = (float(ra) if ra and ra.isdigit()
+                         else base_backoff * (2 ** attempt))
+                if attempt == max_retries:
+                    r.raise_for_status()
+                time.sleep(delay)
+                continue
+            r.raise_for_status()
+            content = r.content
+            if cache_dir is not None:
+                cp = cache_path(cache_dir, url, suffix)
+                cp.write_bytes(content)
+            return content
+    # Unreachable — the loop returns or raises.
+    raise RuntimeError("fetch_bytes: retry loop exited without result")
 
 
 async def fetch_many_bytes(
