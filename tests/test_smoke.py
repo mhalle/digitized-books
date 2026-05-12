@@ -489,6 +489,73 @@ def test_disambiguate_filename():
     assert disambiguate_filename("foo.pdf", {"foo.pdf", "foo-2.pdf"}) == "foo-3.pdf"
 
 
+def test_get_pages_sample_indices_evenly_spaced():
+    from iiif_utils.commands.get_pages import _sample_indices
+    assert _sample_indices(100, 5) == [0, 20, 40, 60, 80]
+    assert _sample_indices(10, 3) == [0, 3, 6]
+    # n > total → return all indices, no duplicates
+    assert _sample_indices(3, 10) == [0, 1, 2]
+    # Edge: clamp last index to total-1 even if step rounds up
+    out = _sample_indices(7, 7)
+    assert out == list(range(7))
+    assert _sample_indices(0, 5) == []
+    assert _sample_indices(10, 0) == []
+
+
+def test_get_pages_requires_source():
+    """--index or --manifest is mandatory."""
+    r = CliRunner().invoke(cli, ["get-pages", "--all", "--url-only"])
+    assert r.exit_code != 0
+    assert "INDEX" in r.output or "manifest" in r.output.lower()
+
+
+def test_get_pages_rejects_combining_sources(tmp_path):
+    """-i and --manifest are mutually exclusive."""
+    idx = tmp_path / "fake.sqlite"
+    idx.write_bytes(b"")  # exists; we won't actually open it
+    r = CliRunner().invoke(cli, [
+        "get-pages", "-i", str(idx), "--manifest", "https://x/m", "--all",
+        "--url-only",
+    ])
+    assert r.exit_code != 0
+    assert "combine" in r.output.lower() or "exclusive" in r.output.lower()
+
+
+def test_get_pages_rejects_child_without_manifest(tmp_path):
+    idx = tmp_path / "fake.sqlite"
+    idx.write_bytes(b"")
+    r = CliRunner().invoke(cli, [
+        "get-pages", "-i", str(idx), "--child", "2", "--all", "--url-only",
+    ])
+    assert r.exit_code != 0
+
+
+def test_get_pages_rejects_zip_with_manifest():
+    """Zip/prefix require an index — they need page-level metadata."""
+    r = CliRunner().invoke(cli, [
+        "get-pages", "--manifest", "https://x/m", "--all", "--zip",
+        "-o", "/tmp/x.zip",
+    ])
+    assert r.exit_code != 0
+    assert "manifest" in r.output.lower()
+
+
+def test_get_pages_rejects_multiple_selection_modes(tmp_path):
+    idx = tmp_path / "fake.sqlite"
+    idx.write_bytes(b"")
+    r = CliRunner().invoke(cli, [
+        "get-pages", "-i", str(idx), "--all", "--sample", "10", "--url-only",
+    ])
+    assert r.exit_code != 0
+    assert "exclusive" in r.output.lower()
+
+
+def test_create_index_has_no_ocr_flag():
+    r = CliRunner().invoke(cli, ["create-index", "--help"])
+    assert r.exit_code == 0
+    assert "--no-ocr" in r.output
+
+
 def test_alto_minimal_parse():
     page = alto.parse_alto_bytes(MINIMAL_ALTO)
     assert page.measurement_unit == "pixel"

@@ -34,12 +34,17 @@ from iiif_utils.utils.slug import slugify
               help="Override provider (e.g. wellcome).")
 @click.option("--allow-empty", is_flag=True, default=False,
               help="Build a metadata-only index even if manifest has 0 canvases.")
+@click.option("--no-ocr", "no_ocr", is_flag=True, default=False,
+              help="Skip per-canvas OCR fetch entirely. Produces an image-only "
+                   "index with text_blocks + illustrations empty and "
+                   "ocr_source='none'. Use for works where ALTO is broken "
+                   "(e.g. Bourgery on Wellcome) or absent (plate atlases).")
 @click.option("--config", "config_path", type=click.Path(path_type=Path),
               default=None)
 @click.pass_context
 def create_index(ctx: click.Context, ref: str, output_dir: Path,
                   output_path: Path | None, provider: str | None,
-                  allow_empty: bool,
+                  allow_empty: bool, no_ocr: bool,
                   config_path: Path | None) -> None:
     """Build a SQLite index for a IIIF manifest."""
     verbose = bool(ctx.obj.get("verbose")) if ctx.obj else False
@@ -142,18 +147,24 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
     tb_rows: list[dict[str, Any]] = []
     il_rows: list[dict[str, Any]] = []
     image_dims: dict[int, tuple[int, int]] = {}
-    n_alto_canvases = sum(1 for c in canvases if c.alto_url)
-    n_hocr_canvases = sum(
-        1 for c in canvases if not c.alto_url and c.hocr_url
-    )
-    n_text_canvases = sum(
-        1 for c in canvases
-        if not c.alto_url and not c.hocr_url and c.text_url
-    )
-    if canvases:
-        tb_rows, il_rows, image_dims = _parse_altos(
-            canvases, cfg_http=cfg_http, cache_dir=cache_dir, log=log,
+    if no_ocr:
+        n_alto_canvases = n_hocr_canvases = n_text_canvases = 0
+        if canvases:
+            log.info(f"--no-ocr: skipping per-canvas OCR for "
+                     f"{len(canvases)} canvases")
+    else:
+        n_alto_canvases = sum(1 for c in canvases if c.alto_url)
+        n_hocr_canvases = sum(
+            1 for c in canvases if not c.alto_url and c.hocr_url
         )
+        n_text_canvases = sum(
+            1 for c in canvases
+            if not c.alto_url and not c.hocr_url and c.text_url
+        )
+        if canvases:
+            tb_rows, il_rows, image_dims = _parse_altos(
+                canvases, cfg_http=cfg_http, cache_dir=cache_dir, log=log,
+            )
 
     # --- index_metadata (after parse so we know the OCR provenance) --------
     from iiif_utils import __version__
@@ -169,7 +180,7 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
     idx_md = {
         "slug": slug,
         "created_at": db_mod.now_iso(),
-        "index_mode": "alto",
+        "index_mode": "image_only" if no_ocr else "alto",
         "ocr_source": ocr_source,
         "provider": ref_obj.provider_key,
         "provider_kind": "iiif",
@@ -183,8 +194,10 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
         idx_md["contains_multiple_volumes"] = flags.contains_multiple_volumes
     db_mod.write_index_metadata(db, idx_md)
 
-    # ALTO-less / OCR-less warnings — fire even without -v
-    if canvases and ocr_source == "none":
+    # ALTO-less / OCR-less warnings — fire even without -v.
+    # When --no-ocr is explicit the user asked for image-only, so the
+    # "no OCR found" warning is just noise; skip it.
+    if canvases and ocr_source == "none" and not no_ocr:
         log.warn(
             f"no per-canvas OCR found for any of {len(canvases)} canvases; "
             f"index will be image-only (text_blocks empty, no FTS hits). "
