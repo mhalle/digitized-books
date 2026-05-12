@@ -95,7 +95,7 @@ Specialty extension. The CNS got its own canon and you'll want it as a separate 
 
 | Pick | Work | Wellcome ID | Date | lic | Notes |
 |------|------|-------------|------|-----|-------|
-| ★ | Cajal, *Histologie du système nerveux* | `cfbxq8k8` / `akfqm42j` | 1909–11 | cc-by-nc (work itself PD) | Two-volume set — keep both. The foundational cellular neuroanatomy. |
+| ★ | Cajal, *Histologie du système nerveux* | `cfbxq8k8` / `akfqm42j` | 1909–11 | cc-by-nc (work itself PD) | Two-volume set — keep both. The foundational cellular neuroanatomy. **Wellcome catalogue quirk:** `cfbxq8k8` (b2129592x) and `akfqm42j` (b21270879) are two bibliographic records for the same 2-vol scan, with mirror-imaged metadata completeness — `cfbxq8k8` has populated printed page numbers for vol 1 but blank for vol 2; `akfqm42j` is the reverse. Cherry-pick `cfbxq8k8_v1` + `akfqm42j_v2` to get the better-cataloged half of each volume; the other two are redundant. OCR quality is equivalent across both records (same ABBYY pipeline, same diacritic-loss patterns). |
 | ★ | Cajal, *Les nouvelles idées* | `gsfwgf65` / `n3hcmcax` | 1894 | pdm | Different work — earlier synthesis. Keep alongside the *Histologie*. |
 | ★ | Edinger, *Vorlesungen*, latest pre-1929 | `z8w4cbad` | 1911 | inc → PD override | Mature form of his neuroanatomy. |
 | | Edinger, earlier eds — skip | `uemusv2h` (1885), `fejjqpys` (1892), `vekxmjwg` (1896), `vjf4gsqc` (1900), `k3wmr2wp` (1908) | | mixed | *Optional historical pair*: if you specifically want to track how his thinking evolved, add `uemusv2h` (1885) — but otherwise the 1911 alone is sufficient. |

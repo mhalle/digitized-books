@@ -556,6 +556,105 @@ def test_create_index_has_no_ocr_flag():
     assert "--no-ocr" in r.output
 
 
+def test_heidelberg_parse_ref_stem_and_url():
+    from iiif_utils.providers import heidelberg as h
+    assert h.parse_ref("bourgery1834bd2_1") == "bourgery1834bd2_1"
+    assert h.parse_ref("bourgey1832bd1_1") == "bourgey1832bd1_1"
+    assert h.parse_ref(
+        "https://digi.ub.uni-heidelberg.de/diglit/bourgery1834bd2_1"
+    ) == "bourgery1834bd2_1"
+    assert h.parse_ref(
+        "https://digi.ub.uni-heidelberg.de/diglit/iiif/bourgery1834bd2_1/manifest.json"
+    ) == "bourgery1834bd2_1"
+    assert h.parse_ref("not a stem!!!") is None
+
+
+def test_heidelberg_parse_mets_alto_urls():
+    """Tiny synthetic METS — verify FULLTEXT fileGrp URLs are extracted."""
+    from iiif_utils.providers.heidelberg import parse_mets_alto_urls
+    mets = b"""<?xml version="1.0"?>
+<mets:mets xmlns:mets="http://www.loc.gov/METS/"
+            xmlns:xlink="http://www.w3.org/1999/xlink">
+  <mets:fileSec>
+    <mets:fileGrp USE="MAX">
+      <mets:file><mets:FLocat xlink:href="https://example.org/img/1"/></mets:file>
+    </mets:fileGrp>
+    <mets:fileGrp USE="FULLTEXT">
+      <mets:file><mets:FLocat xlink:href="https://example.org/ocr/a"/></mets:file>
+      <mets:file><mets:FLocat xlink:href="https://example.org/ocr/b"/></mets:file>
+      <mets:file><mets:FLocat xlink:href="https://example.org/ocr/c"/></mets:file>
+    </mets:fileGrp>
+  </mets:fileSec>
+</mets:mets>"""
+    urls = parse_mets_alto_urls(mets)
+    assert urls == [
+        "https://example.org/ocr/a",
+        "https://example.org/ocr/b",
+        "https://example.org/ocr/c",
+    ]
+
+
+def test_heidelberg_parse_mets_no_fulltext():
+    from iiif_utils.providers.heidelberg import parse_mets_alto_urls
+    mets = b"""<?xml version="1.0"?>
+<mets:mets xmlns:mets="http://www.loc.gov/METS/">
+  <mets:fileSec>
+    <mets:fileGrp USE="MAX"></mets:fileGrp>
+  </mets:fileSec>
+</mets:mets>"""
+    assert parse_mets_alto_urls(mets) == []
+
+
+def test_heidelberg_inject_alto_urls_into_manifest():
+    from iiif_utils.providers.heidelberg import inject_alto_urls
+    manifest = {
+        "@type": "sc:Manifest",
+        "sequences": [{"canvases": [
+            {"@id": "c1"},
+            {"@id": "c2", "seeAlso": {"@id": "existing", "format": "image/svg+xml"}},
+            {"@id": "c3", "seeAlso": [{"@id": "e1"}]},
+        ]}],
+    }
+    out = inject_alto_urls(manifest, [
+        "https://x/ocr/1",
+        "https://x/ocr/2",
+        "https://x/ocr/3",
+    ])
+    canvases = out["sequences"][0]["canvases"]
+    # c1: no prior seeAlso → list of 1
+    assert canvases[0]["seeAlso"] == [
+        {"@id": "https://x/ocr/1", "format": "text/xml",
+         "profile": "http://www.loc.gov/standards/alto/ns-v2#",
+         "label": "ALTO (Heidelberg)"},
+    ]
+    # c2: had a dict → normalized to list of 2
+    assert len(canvases[1]["seeAlso"]) == 2
+    assert canvases[1]["seeAlso"][1]["@id"] == "https://x/ocr/2"
+    # c3: had a list of 1 → extended to 2
+    assert len(canvases[2]["seeAlso"]) == 2
+    assert canvases[2]["seeAlso"][1]["@id"] == "https://x/ocr/3"
+
+
+def test_heidelberg_inject_alto_fewer_urls_than_canvases():
+    """Partial coverage: shorter ALTO list → only first N canvases get it."""
+    from iiif_utils.providers.heidelberg import inject_alto_urls
+    manifest = {"sequences": [{"canvases": [{"@id": f"c{i}"} for i in range(5)]}]}
+    inject_alto_urls(manifest, ["https://x/1", "https://x/2"])
+    canvases = manifest["sequences"][0]["canvases"]
+    assert "seeAlso" in canvases[0] and "seeAlso" in canvases[1]
+    assert "seeAlso" not in canvases[2]
+    assert "seeAlso" not in canvases[3]
+    assert "seeAlso" not in canvases[4]
+
+
+def test_heidelberg_provider_guessed_from_url():
+    from iiif_utils.providers import _guess_provider
+    cfg = {"default_provider": "generic"}
+    assert _guess_provider(
+        "https://digi.ub.uni-heidelberg.de/diglit/bourgery1834bd2_1", cfg,
+    ) == "heidelberg"
+
+
 def test_alto_minimal_parse():
     page = alto.parse_alto_bytes(MINIMAL_ALTO)
     assert page.measurement_unit == "pixel"

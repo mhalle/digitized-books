@@ -51,6 +51,12 @@ def resolve(ref: str, *, cfg: dict[str, Any], explicit_provider: str | None = No
     if provider_key == "mdz":
         return _resolve_mdz(ref, cfg=cfg, cfg_http=cfg_http, cache_dir=cache_dir)
 
+    # Heidelberg ALTO is referenced from a manifest-level METS, not from
+    # per-canvas seeAlso. Adapter fetches both and injects ALTO URLs.
+    if provider_key == "heidelberg":
+        return _resolve_heidelberg(ref, cfg=cfg, cfg_http=cfg_http,
+                                    cache_dir=cache_dir)
+
     if ref.startswith(("http://", "https://")):
         return ManifestRef(
             manifest_url=ref,
@@ -76,6 +82,10 @@ def _guess_provider(ref: str, cfg: dict[str, Any]) -> str:
         # MDZ manifest URLs need the mdz provider (injects hOCR seeAlso)
         if host and host.endswith("digitale-sammlungen.de"):
             return "mdz"
+        # Heidelberg diglit URLs need the heidelberg provider
+        # (injects ALTO seeAlso via METS lookup)
+        if host == "digi.ub.uni-heidelberg.de":
+            return "heidelberg"
         # Hostname → provider key, if any configured provider declares an iiif_base
         for key, p in (cfg.get("providers") or {}).items():
             base = p.get("iiif_base")
@@ -118,6 +128,28 @@ def _resolve_mdz(ref: str, *, cfg: dict[str, Any], cfg_http: dict[str, Any],
     return ManifestRef(
         manifest_url=mdz_mod.manifest_url_for(bsb),
         provider_key="mdz",
+        extra_metadata=extra,
+        manifest_payload=manifest,
+    )
+
+
+def _resolve_heidelberg(ref: str, *, cfg: dict[str, Any],
+                         cfg_http: dict[str, Any],
+                         cache_dir: Any) -> ManifestRef:
+    from iiif_utils.providers import heidelberg as h_mod
+    stem = h_mod.parse_ref(ref)
+    if not stem:
+        raise ValueError(
+            f"Cannot extract Heidelberg diglit stem from {ref!r} — pass a "
+            f"stem like 'bourgery1834bd2_1' or a URL like "
+            f"'https://digi.ub.uni-heidelberg.de/diglit/bourgery1834bd2_1'."
+        )
+    manifest = h_mod.fetch_and_augment(stem, cfg_http=cfg_http,
+                                        cache_dir=cache_dir)
+    extra = h_mod.extra_metadata_for(manifest, stem)
+    return ManifestRef(
+        manifest_url=h_mod.manifest_url_for(stem),
+        provider_key="heidelberg",
         extra_metadata=extra,
         manifest_payload=manifest,
     )

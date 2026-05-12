@@ -28,6 +28,15 @@ iiif_base = "https://api.digitale-sammlungen.de"
 # injects hOCR URLs as canvas seeAlso entries.
 ocr_preference = ["hocr"]
 
+[providers.heidelberg]
+type = "heidelberg"
+iiif_base = "https://digi.ub.uni-heidelberg.de"
+# Heidelberg has IIIF v2 manifests with a manifest-level seeAlso to METS.
+# The METS FULLTEXT fileGrp lists per-page ALTO URLs (served via
+# /cgi-bin/get_ocr.cgi). Adapter fetches manifest + METS and injects
+# ALTO URLs as canvas seeAlso entries.
+ocr_preference = ["alto"]
+
 [http]
 user_agent = "iiif-utils/0.1"
 timeout_seconds = 60
