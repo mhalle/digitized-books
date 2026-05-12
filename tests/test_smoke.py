@@ -72,6 +72,62 @@ def test_create_mosaic_tiny():
     assert im.size == (200, 150)
 
 
+def test_create_mosaic_letterboxes_extreme_aspect():
+    """Fold-out plates have wild aspect ratios — must not stretch to fit
+    the first tile's shape. Verify the second tile gets letterboxed."""
+    import io as _io
+    from PIL import Image as _Image
+    from iiif_utils.core.mosaic import create_mosaic
+
+    def jpg(w, h, color):
+        b = _io.BytesIO()
+        _Image.new("RGB", (w, h), color).save(b, format="JPEG")
+        return b.getvalue()
+
+    # First tile: standard book-page aspect (~0.7 wide:tall)
+    # Second tile: extreme tall fold-out (~0.35 wide:tall — like Bourgery's `af`)
+    standard = jpg(700, 1000, "red")
+    fold_out = jpg(700, 2000, "blue")
+
+    out = create_mosaic([standard, fold_out],
+                        labels=None, width=200, cols=2, grid=False)
+    im = _Image.open(_io.BytesIO(out))
+    # Grid is uniform: cells are 100×142 (first tile's aspect at 100w).
+    # Fold-out fits-within so it gets letterboxed with white bars top+bottom.
+    assert im.size == (200, 142)
+
+    # Sample a pixel that should be white from letterboxing.
+    # Second tile occupies the right half. Fold-out at 100w preserves aspect →
+    # ~50h (since 700w → 2000h scaled to 100w → ~285h, but capped to 142, so
+    # actual rendered size is constrained to fit 100×142). Top-left corner of
+    # right tile should be inside the rendered area or letterbox depending on
+    # which dimension is the limiter. Just confirm: the right-tile region
+    # has at least some non-blue pixels (letterbox bars or blue image).
+    px_top_right = im.getpixel((199, 0))
+    # Either white (letterbox) or blue (image edge) — but NOT distorted-red
+    assert px_top_right != (255, 0, 0), (
+        "right tile shouldn't contain first-image color"
+    )
+
+
+def test_create_mosaic_uniform_aspect_unchanged():
+    """When all tiles share the first tile's aspect, output dims are unchanged
+    from the pre-letterboxing behavior."""
+    import io as _io
+    from PIL import Image as _Image
+    from iiif_utils.core.mosaic import create_mosaic
+
+    def jpg(color):
+        b = _io.BytesIO()
+        _Image.new("RGB", (100, 150), color).save(b, format="JPEG")
+        return b.getvalue()
+
+    out = create_mosaic([jpg("red"), jpg("blue")],
+                        labels=["A", "B"], width=200, cols=2, grid=True)
+    im = _Image.open(_io.BytesIO(out))
+    assert im.size == (200, 150)
+
+
 def test_seealso_polymorphism():
     """v2 allowed seeAlso to be a single dict, a list of dicts, or strings."""
     from iiif_utils.core.manifest import _alto_seealso

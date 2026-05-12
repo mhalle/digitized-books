@@ -35,21 +35,35 @@ def create_mosaic(
             f"({len(labels)} vs {len(images)})"
         )
 
+    # Tile cell width is fixed by the grid; cell height is set by the
+    # FIRST image's aspect ratio. Tiles with different aspects (e.g. fold-out
+    # plates) are *letterboxed* — fit inside the cell preserving aspect,
+    # with white bars on the excess axis. Without this, fold-outs get
+    # vertically squished into the standard cell shape.
     tile_w = width // cols
-    tile_h: int | None = None
+    cell_h: int | None = None
     tiles: list[Image.Image] = []
     for raw in images:
         loaded = Image.open(io.BytesIO(raw))
         aspect = loaded.height / loaded.width if loaded.width else 1.0
-        new_h = int(tile_w * aspect)
-        if tile_h is None:
-            tile_h = new_h
-        resized: Image.Image = loaded.resize((tile_w, tile_h),
+        if cell_h is None:
+            cell_h = max(1, int(tile_w * aspect))
+        # Fit-within: scale so neither side exceeds (tile_w, cell_h)
+        s = min(tile_w / loaded.width, cell_h / loaded.height) if loaded.width and loaded.height else 1.0
+        new_w = max(1, int(loaded.width * s))
+        new_h = max(1, int(loaded.height * s))
+        resized: Image.Image = loaded.resize((new_w, new_h),
                                               Image.Resampling.LANCZOS)
         if resized.mode != "RGB":
             resized = resized.convert("RGB")
-        tiles.append(resized)
-    assert tile_h is not None
+        if new_w == tile_w and new_h == cell_h:
+            tiles.append(resized)
+        else:
+            cell = Image.new("RGB", (tile_w, cell_h), (255, 255, 255))
+            cell.paste(resized, ((tile_w - new_w) // 2, (cell_h - new_h) // 2))
+            tiles.append(cell)
+    assert cell_h is not None
+    tile_h = cell_h
 
     rows = (len(tiles) + cols - 1) // cols
     canvas_w = cols * tile_w
