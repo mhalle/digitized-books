@@ -33,8 +33,10 @@ The first one or two blocks of each canvas usually contain the running
 header. Query for short, mostly-uppercase, header-style strings across
 the unlabelled range:
 
+All shell snippets here assume `uv run` — e.g. `uv run python3 -c '...'`.
+
 ```bash
-python3 -c "
+uv run python3 -c "
 import sqlite3, re
 con = sqlite3.connect('<db>')
 for r in con.execute('''

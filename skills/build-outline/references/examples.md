@@ -26,7 +26,7 @@ SKILL.md or run:
 ```bash
 # Pull any nested payload back to flat, then re-resolve and dry-run.
 # Should validate with the same entry count.
-python3 -c "
+uv run python3 -c "
 import json; from pathlib import Path
 orig = json.loads(Path('experiments/ranson_toc/outline_payload.json').read_text())
 flat = []
@@ -39,9 +39,9 @@ for n in orig['entries']:
     walk(n, 0)
 Path('/tmp/check.json').write_text(json.dumps({'work': orig['work'], 'flat_entries': flat}))
 "
-python3 skills/build-outline/scripts/resolve_outline.py \
+uv run python3 skills/build-outline/scripts/resolve_outline.py \
     corpus/wellcome/bjsh27ua.sqlite /tmp/check.json -o /tmp/check_resolved.json
-iiif-utils outline-import corpus/wellcome/bjsh27ua.sqlite \
+uv run iiif-utils outline-import corpus/wellcome/bjsh27ua.sqlite \
     /tmp/check_resolved.json --dry-run
 # → OK (dry-run): 118 entries valid for bjsh27ua
 ```

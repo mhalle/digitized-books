@@ -41,12 +41,27 @@ re-derive it.
 the existing `experiments/ranson_toc/`, `cunningham_toc/`, etc. for
 prior work.
 
+## Tooling — always invoke CLI/Python via `uv run`
+
+This repo manages its environment with **uv**. Every Bash invocation
+in this skill must go through `uv run`:
+
+- `uv run iiif-utils <subcommand> ...` — NOT `iiif-utils ...` or
+  `.venv/bin/iiif-utils ...`
+- `uv run python3 ...` — NOT bare `python3 ...` or `.venv/bin/python ...`
+- `uv run python3 skills/build-outline/scripts/resolve_outline.py ...`
+
+The repo's permissions allowlist matches the `uv run *` pattern.
+Direct invocations of `.venv/bin/*` or bare `python3 <script>`
+typically fail with a Bash-denied error. If a command bounces, the
+first thing to try is wrapping it in `uv run`.
+
 ## Procedure
 
 ### 1. Confirm the target needs an outline
 
 ```bash
-iiif-utils outline-status <db_path>
+uv run iiif-utils outline-status <db_path>
 ```
 
 If `outline_rows` is non-zero, the work already has an outline. Confirm
@@ -57,7 +72,7 @@ or a fresh import).
 ### 2. Inspect the db: pagination + IIIF structure
 
 ```bash
-python3 -c "
+uv run python3 -c "
 import sqlite3
 con = sqlite3.connect('<db_path>')
 print('canvases:', con.execute('SELECT COUNT(*) FROM page_numbers').fetchone()[0])
@@ -88,7 +103,7 @@ canvas indices (e.g. Heidelberg). Scan for it:
 **Front matter** (default first guess — most English and modern works):
 
 ```bash
-python3 -c "
+uv run python3 -c "
 import sqlite3, re
 con = sqlite3.connect('<db_path>')
 pat = re.compile(r'\b(contents|inhalt|inhaltsverzeichnis|sommaire|table\s+des\s+matières|indice|índice|tabula)\b', re.IGNORECASE)
@@ -111,7 +126,7 @@ fetching and reading.
 ### 4. Fetch the TOC images at 1600 px
 
 ```bash
-iiif-utils get-pages -i <db_path> --leaves <start>-<end> \
+uv run iiif-utils get-pages -i <db_path> --leaves <start>-<end> \
     --size '!1600,1600' --prefix experiments/<short>_toc/toc_pages/page
 ```
 
@@ -144,7 +159,7 @@ primary sources:
   the OCR like this:
 
   ```bash
-  python3 -c "
+  uv run python3 -c "
   import sqlite3
   con = sqlite3.connect('<db_path>')
   for leaf in [<toc canvases>]:
@@ -327,7 +342,7 @@ pagination can't be located on a canvas via the standard resolver.
 ### 6. Resolve to the nested payload
 
 ```bash
-python3 skills/build-outline/scripts/resolve_outline.py \
+uv run python3 skills/build-outline/scripts/resolve_outline.py \
     <db_path> experiments/<short>_toc/flat.json \
     -o experiments/<short>_toc/outline_payload.json
 ```
@@ -349,7 +364,7 @@ You don't need to write any of this yourself.
 ### 7. Import
 
 ```bash
-iiif-utils outline-import <db_path> \
+uv run iiif-utils outline-import <db_path> \
     experiments/<short>_toc/outline_payload.json
 ```
 
@@ -360,7 +375,7 @@ specific entries — fix the flat JSON, re-run step 6, re-import with
 ### 8. Verify
 
 ```bash
-iiif-utils outline-list <db_path> | head -50
+uv run iiif-utils outline-list <db_path> | head -50
 ```
 
 Spot-check:

@@ -248,7 +248,7 @@ Active totals (wellcome): ~32,496 canvases, ~262,517 text blocks, ~17,140 illust
 - Atlases / plate-only works where Wellcome's ALTO doesn't tag illustrations: `<Illustration>` regions are absent for Piersol (`mvaqfjxm_v1/v2`), Toldt (`tgekje3p_v1..v3`), Hunter (`wc7gxkcu`), Crooke (`resfyxts`), Cheselden (`jfkydvqm`), Albinus *Tabulae ossium* (`ugz833qz`) and *Tabulae VII* (`t6hqn97a`). Text-block FTS is intact for the prose ones; figure-region retrieval is not possible from the Wellcome ALTO for these works.
 - Plate-heavy works with negligible body text: `t6hqn97a` (Albinus *Tabulae VII*) has only ~8K chars across 87 canvases, `ugz833qz` ~61K, `wc7gxkcu` (Hunter) ~250K (mostly figure callouts), `jfkydvqm` (Cheselden) ~263K. These are visual-primary and will not surface in full-text retrieval against the prose corpus.
 
-## Derived navigation outlines (as of 2026-05-12)
+## Derived navigation outlines (as of 2026-05-13)
 
 `derived_outline` is a per-book sqlite table carrying a hierarchical
 outline of the work — chapters, sections, plates, figures, etc., each
@@ -259,7 +259,11 @@ page label. The schema, CLI, and JSON Schema are documented in
 a sqlite index by reading TOC images, body running headers, or figure
 captions.
 
-**44 / 83 active dbs outlined; 14,109 total entries.**
+**75 / 97 indices outlined; 19,133 total entries.** Remaining 22 dbs:
+14 inactive Wellcome Bourgery image-only mirrors (excluded by design —
+Heidelberg is canonical), 3 redundant-scan duplicates already cleared
+(Quain v3 + 2 more), and 5 confirmed bailouts (plate-only atlases /
+pre-1600 stubs — see "Bailed-out works" below).
 
 Three skill techniques in use:
 
@@ -277,12 +281,13 @@ Three skill techniques in use:
    standalone, prose-suffixed, concatenated. See
    `skills/build-outline/references/figure_caption_extraction.md`.
 
-**Outlined works:**
+**Outlined works** (top 50 by entry count; full list via `uv run iiif-utils outline-status corpus/*/*.sqlite`):
 
 | work | id | language | entries | depth | approach |
 |---|---|---|---|---|---|
 | Gray UK 1883 | `jev9kze2` | en | 1707 | 4 | TOC; needed post-fix for Wellcome page-numbers collision |
 | Bourgery Bd 8 1854 | `bourgery1854bd8_1` | fr | 1010 | 4 | TOC, dense back-matter |
+| Piersol v2 1918 | `mvaqfjxm_v2` | en | 782 | 3 | TOC, 4 systems |
 | Cunningham *Text-book* 1914 | `cfn934u3` | en | 688 | 3 | TOC |
 | Bourgery Bd 5 1839 | `bourgery1839bd5_1` | fr | 676 | 3 | TOC + Roman supplement |
 | Gerrish 1899 | `dsgx7nzq` | en | 600 | 3 | TOC, multi-author |
@@ -293,50 +298,87 @@ Three skill techniques in use:
 | Hyrtl 1889 | `xugmyg7r` | de | 483 | 3 | TOC |
 | Cajal *Histologie* v1 | `cfbxq8k8_v1` | fr | 470 | 2 | TOC |
 | Bourgery Bd 3 1844 | `bourgery1844bd3_1` | fr | 462 | 3 | TOC |
+| Sappey v4 | `h9n43hma_v4` | fr | 446 | 7 | TOC, Splanchnologie + Embryologie |
 | Sappey v3 | `h9n43hma_v3` | fr | 438 | 8 | TOC |
-| Sappey v1 | `h9n43hma_v1` | fr | 414 | 5 | TOC |
+| Sobotta Histo v2 1929 | `v43geect_v2` | de | 427 | 2 | TOC + figure-caption (deterministic stride; page_numbers all NULL) |
 | Toldt v1 1919 | `tgekje3p_v1` | de | 424 | 2 | body-header + figure-caption |
+| Sappey v1 | `h9n43hma_v1` | fr | 414 | 5 | TOC |
+| Albinus 1754 (Eng tr.) | `r3thaf6m` | en | 375 | 3 | body-header + canvas-anchor (Wellcome page collision) |
+| Toldt v2 1919 | `tgekje3p_v2` | de | 348 | 3 | TOC + figure-caption (321 figs) |
 | Bourgery Bd 7 1840 | `bourgery1840bd7_1` | fr | 342 | 3 | TOC |
 | Bourgery Bd 1 1832 | `bourgey1832bd1_1` | fr | 333 | 6 | TOC, full Partie/Division/Livre hierarchy |
 | Bourgery Bd 4 1835 | `bourgery1835bd4_1` | fr | 331 | 3 | TOC, circulatory |
 | Bourgery Bd 6 1837 | `bourgery1837bd6_1` | fr | 316 | 5 | TOC, surgical anatomy |
 | Sobotta English v1 | `kdckv24y_v1` | en | 288 | 2 | section TOC + figure-caption |
+| Henle *Handbuch* Muskeln 1858 | `cz73pq6c` | de | 281 | 7 | TOC, deep Greek-letter hierarchy |
 | Bourgery Bd 2 1834 | `bourgery1834bd2_1` | fr | 279 | 3 | TOC |
+| Toldt v3 1919 | `tgekje3p_v3` | de | 270 | 3 | TOC + figure-caption (252 figs) |
 | Henle *Handbuch* Bd 5 1868 | `ywgnwrfg` | de | 260 | 8 | TOC, full vascular enumeration |
 | Spalteholz v2 | `d8quuwxg_v2` | en | 236 | 2 | body-header + figure-caption (concatenated regex) |
 | Piersol v1 | `mvaqfjxm_v1` | en | 217 | 2 | body-header fallback (image service 404) |
+| Henle *Handbuch* Eingeweide 1862 | `veuxugxf` | de | 213 | 8 | TOC, back-matter, Greek/Roman/letter |
 | Quain v2 | `gw75hbbr_v2` | en | 208 | 2 | TOC |
 | Spalteholz v3 | `d8quuwxg_v3` | en | 201 | 2 | body-header + figure-caption |
+| Quain v4 1908-09 | `gw75hbbr_v4` | en | 196 | 4 | TOC; needed page_numbers UPDATE patch (truncated past leaf 238) |
 | Sobotta Histologie v1 | `v43geect_v1` | de | 190 | 6 | TOC (Lehrbuch+Atlas hybrid) |
 | Sobotta English v2 | `kdckv24y_v2` | en | 185 | 3 | section TOC + figure-caption (concatenated) |
+| Crooke 1618 | `resfyxts` | en | 185 | 2 | TOC (Bk I-IV, XII-XIII) + body-header (Bk V-XI) |
 | Henle *Handbuch* Bd 6 1879 | `g84rzrx7` | de | 174 | 7 | TOC, full cranial-nerve hierarchy |
 | Spalteholz v1 | `d8quuwxg_v1` | en | 164 | 2 | body-header + figure-caption (Spalteholz precedent) |
+| Ellis *Demonstrations* 1887 | `dzmjbt9h` | en | 161 | 3 | TOC, 11 Chapters + Index |
+| Henle *Handbuch* Bänder 1856 | `xs8jejsy` | de | 156 | 7 | TOC, deep Greek-letter hierarchy |
 | Ranson 1927 | `bjsh27ua` | en | 118 | 2 | TOC, hand-built first |
 | Quain v1 | `gw75hbbr_v1` | en | 112 | 3 | TOC + body-header fallback (incomplete TOC) |
+| Bourgery atlas Bd 2 1831 | `bourgey1831bd2_2` | fr | 100 | 0 | Planche-N mining (per-plate header OCR) |
+| Bourgery atlas Bd 7 1840 | `bourgey1840bd7_2` | fr | 98 | 0 | Planche-N mining (plus Pl. A-P surgical supplement) |
 | Brodmann 1909 | `vrnkkxtj` | de | 98 | 6 | TOC, deep Roman/Greek hierarchy |
 | Bardeleben Tandler 1913 | `f3xd4cyt` | de | 96 | 5 | TOC |
+| Bourgery atlas Bd 5 1839 | `bourgey1839bd5_2` | fr | 95 | 0 | Planche-N mining |
+| Bourgery atlas Bd 3 1844 | `bourgey1844bd3_2` | fr | 94 | 0 | Planche-N mining (letter labels only) |
+| Bourgery atlas Bd 4 1836 | `bourgey1836bd4_2` | fr | 92 | 0 | Planche-N mining |
 | Rauber-Kopsch 1912 | `h8cwyqvx` | de | 88 | 4 | TOC |
-| Henle *Handbuch* Bd 1 1855 | `e5pwrbf9` | de | 71 | 5 | TOC |
+| Henle *Hand-Atlas* Bd 6 1877 | `henle1877bd6` | de | 85 | 1 | Tafel-Roman mining (CCI-CCLXXXIV) |
+| Sappey *Anatomie desc.* T.III | `dnbmq5p3` | fr | 68 | 2 | body-header (catalog mismatch: not *générale*) |
+| Bourgery atlas Bd 8 1844 | `bourgey1844bd8_2` | fr | 67 | 0 | Planche-N mining (final atlas vol) |
+| Bardeleben Holl 1897 | `z3ny6kad` | de | 62 | 4 | TOC, Beckenausgang offprint |
+| Henle *Hand-Atlas* Bd 5 1876 | `henle1876bd5` | de | 60 | 1 | Tafel-Roman mining (CXLII-CC) |
 | Bourgery atlas Bd 1 1831 | `bourgey1831bd1_2` | fr | 59 | 0 | Planche-N mining |
-| Quain v3 | `gw75hbbr_v3` | en | (cleared) | — | redundant scan of v2 |
+| Cheselden 1733 | `jfkydvqm` | en | 56 | 0 | Table I-LVI from page_numbers anchor |
+| Holden | `cafpy896` | en | 52 | 0 | TOC, Victorian dissection |
 | Cunningham *Manual* 1914 | `kw6vt8gv` | en | 50 | 2 | TOC, 3 regions |
+| Teichmann *Saugadersystem* 1861 | `amgkntw3` | de | 46 | 6 | TOC, lymphatic monograph + 18 Kupfertafeln |
+| Henle *Hand-Atlas* Bd 4 1874 | `henle1874bd4` | de | 44 | 1 | Tafel-Roman mining (C-CXLI) |
+| Poirier *Lymphatics* (Eng) 1903 | `yd8qmy94` | en | 44 | 3 | TOC (Leaf translation, not generic Poirier-Cuneo) |
 | Schäfer 1920 | `b69dh6vk` | en | 42 | 0 | TOC, flat lesson list |
 | Henle *Hand-Atlas* Bd 1 1874 | `henle1871bd1` | de | 36 | 1 | Tafel-Roman mining |
 | Edinger 1911 | `z8w4cbad` | de | 35 | 1 | TOC, Vorlesungen |
+| Henle *Hand-Atlas* Bd 2 1874 | `henle1874bd2` | de | 22 | 1 | Tafel-Roman mining |
 | Keith 1913 | `w8yhh68k` | en | 23 | 0 | TOC, chapter-only |
 | McMurrich 1910 | `g9my2acs` | en | 21 | 1 | TOC, Parts + Chapters |
-| Holden | `cafpy896` | en | 52 | 0 | TOC, Victorian dissection |
+| Cajal *Nouvelles idées* 1894 | `gsfwgf65` | fr | 19 | 1 | TOC, back-matter |
+| Bardeleben Krause 1909 | `wcjvv3n2` | de | 10 | 0 | TOC (Krause Skelet offprint, chapter-only) |
+| Henle *Hand-Atlas* Bd 3 1874 | `henle1874bd3` | de | 45 | 1 | Tafel-Roman mining (LVI-XCIX) |
 
-**Remaining active dbs to outline** (~39 dbs; see `iiif-utils outline-status corpus/*/*.sqlite --missing-only`):
+(Several minor entries truncated for brevity; the table represents the
+shape of the corpus rather than every row. Quain v3 was cleared as a
+redundant scan of v2.)
 
-- **Textbooks**: Sappey v4 (`h9n43hma_v4`), Quain v4 (`gw75hbbr_v4`), Piersol v2 (`mvaqfjxm_v2`), Bardeleben Holl 1897 (`z3ny6kad`), Bardeleben Krause 1909 (`wcjvv3n2`), Cajal *Nouvelles idées* 1894 (`gsfwgf65`), Sappey *générale* 1894 (`dnbmq5p3`), Ellis *Demonstrations* (`dzmjbt9h`), Poirier-Cunéo (`yd8qmy94`), Crooke *Mikrokosmographia* 1618 (`resfyxts`).
-- **Henle *Handbuch* Bd 2-4**: `xs8jejsy` (Bänder), `cz73pq6c` (Muskel), `veuxugxf` (Eingeweide).
-- **Henle *Hand-Atlas* Bd 2-6**: `henle1874bd2` through `henle1877bd6` (Tafel-Roman pattern, like Bd 1).
-- **Bourgery atlas Bd 2-8**: 7 Heidelberg atlas vols, Planche-N pattern like Bd 1.
-- **Toldt v2/v3**, **Sobotta Histo v2**: figure-caption enrichment applies.
-- **Plate atlases that bail**: Cheselden 1733 (`jfkydvqm` — no body page anchors), Albinus×3 (`r3thaf6m`, `ugz833qz`, `t6hqn97a`), Hunter (`wc7gxkcu`).
-- **Pre-1600 metadata-only stubs**: Vesalius *Epitome* (`g6b6smge`), Valverde (`nrtzmcfn`) — no OCR, need a different procedure.
-- **`amgkntw3.sqlite`** (172 canvases): not yet looked at.
+**Bailed-out works** (5 plate-only / pre-1600 stubs — no anchor for the standard resolver):
+
+| work | id | year | reason |
+|---|---|---|---|
+| Hunter, *Gravid Uterus* (Eng/Lat) | `wc7gxkcu` | 1815 | Plate-only atlas. `page_numbers` all NULL; no TOC; per-plate *TABULA N* explanations only. |
+| Albinus, *Tabulae ossium humanorum* | `ugz833qz` | 1753 | Plate-only atlas. `page_numbers` all NULL; no TOC; no IIIF body structure. |
+| Albinus, *Tabulae VII uteri gravidae* | `t6hqn97a` | 1748-51 | Plate-only obstetric atlas, 8 plates + Appendix. Wellcome catalog: *"without text."* |
+| Vesalius, *Fabrica librorum Epitome* | `g6b6smge` | 1543 | Pre-1600, zero OCR (`text_blocks` table absent), no IIIF structures, no page_numbers. |
+| Valverde, *Composición del cuerpo humano* | `nrtzmcfn` | 1556 | Pre-1600, zero OCR, no ranges, no page_numbers (374 canvases of Spanish text + plates copied from Vesalius). |
+
+Each bailout has an `experiments/<work>_toc/BAILOUT.md` documenting
+what was found. Path forward for these: per-plate canvas-anchored
+outlining (mine each plate's facing letterpress for `TABULA N` /
+`Plate N` and emit payload entries with explicit `canvas_start`/
+`canvas_end` instead of going through the `printed_page`→canvas
+resolver — the pattern Sobotta Histo v2's build agent already used).
 
 **Known issues, worth addressing:**
 
@@ -344,10 +386,14 @@ Three skill techniques in use:
    Roman front-matter OCR'd as Arabic, low page numbers (1–17) collide
    with body Arabic pages. The default first-occurrence rule in
    `resolve_outline.py` routes body entries to front-matter leaves.
-   Hit by Gray UK, Piersol v1, Sobotta v1 (3 confirmed cases, all
-   patched manually). Fix: in `_build_page_lookup`, when a page number
-   has duplicate occurrences spanning >20 canvases, prefer the later
-   occurrence over the earlier.
+   Hit by Gray UK, Piersol v1, Sobotta v1 (3 confirmed) plus Toldt v2/v3,
+   Albinus 1754, and the Quain v4 truncation variant (page_numbers
+   NULL past leaf 238, fixed via in-place UPDATE). Each subagent has
+   patched manually. **Fix**: in `_build_page_lookup`, when a page
+   number has duplicate occurrences spanning >20 canvases, prefer the
+   later occurrence over the earlier; and accept `canvas_start`/
+   `canvas_end` directly in flat.json as an escape hatch (the pattern
+   Sobotta Histo v2 + Albinus 1754 already needed).
 2. **Heidelberg `ranges.canvas_start/end` are NULL** for several dbs —
    range labels are present but canvas indices aren't. The provider's
    IIIF↔METS adapter doesn't translate range→canvas. Workaround: TOC
@@ -356,7 +402,17 @@ Three skill techniques in use:
    at time of run. Other dbs in the same Collection work. Manifest +
    ALTO are intact, only the image service fails. Re-check before
    any re-outline.
-4. **Atlases without body page anchors** (Cheselden, possibly Albinus
-   and Hunter) need a per-plate caption extraction procedure that
-   doesn't depend on `page_numbers` lookups. Out of scope for the
-   current skill.
+4. **Plate-only atlases bail out cleanly** but remain un-citable. The
+   5 confirmed bailouts (Hunter, Albinus×2 plate-only, Vesalius
+   *Epitome*, Valverde) need a per-plate canvas-anchored outline
+   procedure that doesn't depend on `page_numbers` lookups. The
+   technique used by Sobotta Histo v2's build agent (explicit
+   `canvas_start` per entry, mine the plate-explanation header) is the
+   right shape — worth promoting to a fourth skill technique alongside
+   printed-TOC / body-header / figure-caption.
+5. **Wellcome catalog metadata sometimes wrong about the bound scan.**
+   `dnbmq5p3` is catalogued as Sappey *Anatomie générale* 1894 but the
+   bound scan is *Anatomie descriptive* Tome III 1889. `yd8qmy94` is
+   catalogued as Poirier-Cunéo but is actually Leaf's English
+   translation *The Lymphatics* (1903). Identity check from the
+   title-page image is load-bearing.
