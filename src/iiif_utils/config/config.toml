@@ -37,6 +37,24 @@ iiif_base = "https://digi.ub.uni-heidelberg.de"
 # ALTO URLs as canvas seeAlso entries.
 ocr_preference = ["alto"]
 
+[providers.gallica]
+type = "gallica"
+iiif_base = "https://gallica.bnf.fr"
+# Gallica has IIIF v2 manifests but per-page ALTO is at a separate
+# RequestDigitalElement endpoint keyed by ARK + folio number. Adapter
+# fetches the manifest and injects per-canvas ALTO URLs as seeAlso.
+ocr_preference = ["alto"]
+# Gallica throttles aggressively on req/s, not on concurrent connections.
+# Cap to 1 concurrent + 250ms inter-request floor (~4 req/s, comfortably
+# below the documented ~5 req/s ceiling). Keep the retry budget short —
+# the previous 12-retry / 2048s tail caused multi-hour hangs when a work
+# got persistently throttled. 6 retries × 1s base = max ~63s per request.
+# Better to fail fast and re-run than hang silently.
+max_concurrency = 1
+request_interval_seconds = 0.25
+max_retries = 6
+retry_base_seconds = 1.0
+
 [http]
 user_agent = "iiif-utils/0.1"
 timeout_seconds = 60

@@ -8,7 +8,11 @@ from urllib.parse import urlparse
 
 from iiif_utils.core import http as http_
 
-B_NUMBER_RE = re.compile(r"^b\d{7}[\dx]$", re.IGNORECASE)
+# Wellcome b-number — either a top-level work (`b22396147`) or a child
+# manifest in a multi-volume Collection (`b22396147_0003`, `b22396147_003`).
+# Wellcome uses 3-digit suffixes on some older Collections (Merkel) and
+# 4-digit suffixes on most newer ones (Testut, Poirier-Charpy).
+B_NUMBER_RE = re.compile(r"^b\d{7}[\dx](_\d{3,4})?$", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -57,6 +61,13 @@ def resolve(ref: str, *, cfg: dict[str, Any], explicit_provider: str | None = No
         return _resolve_heidelberg(ref, cfg=cfg, cfg_http=cfg_http,
                                     cache_dir=cache_dir)
 
+    # Gallica has IIIF v2 manifests but per-page ALTO lives at a
+    # separate RequestDigitalElement endpoint, not in canvas seeAlso.
+    # Adapter fetches the manifest and injects ALTO URLs per canvas.
+    if provider_key == "gallica":
+        return _resolve_gallica(ref, cfg=cfg, cfg_http=cfg_http,
+                                 cache_dir=cache_dir)
+
     if ref.startswith(("http://", "https://")):
         return ManifestRef(
             manifest_url=ref,
@@ -86,6 +97,10 @@ def _guess_provider(ref: str, cfg: dict[str, Any]) -> str:
         # (injects ALTO seeAlso via METS lookup)
         if host == "digi.ub.uni-heidelberg.de":
             return "heidelberg"
+        # Gallica URLs (gallica.bnf.fr) — injects ALTO seeAlso via
+        # the RequestDigitalElement endpoint per folio number.
+        if host == "gallica.bnf.fr":
+            return "gallica"
         # Hostname → provider key, if any configured provider declares an iiif_base
         for key, p in (cfg.get("providers") or {}).items():
             base = p.get("iiif_base")
@@ -155,6 +170,28 @@ def _resolve_heidelberg(ref: str, *, cfg: dict[str, Any],
     )
 
 
+def _resolve_gallica(ref: str, *, cfg: dict[str, Any],
+                      cfg_http: dict[str, Any],
+                      cache_dir: Any) -> ManifestRef:
+    from iiif_utils.providers import gallica as g_mod
+    ark = g_mod.parse_ref(ref)
+    if not ark:
+        raise ValueError(
+            f"Cannot extract Gallica ARK stem from {ref!r} — pass a stem "
+            f"like 'bpt6k323992j' or a URL like "
+            f"'https://gallica.bnf.fr/ark:/12148/bpt6k323992j'."
+        )
+    manifest = g_mod.fetch_and_augment(ark, cfg_http=cfg_http,
+                                         cache_dir=cache_dir)
+    extra = g_mod.extra_metadata_for(manifest, ark)
+    return ManifestRef(
+        manifest_url=g_mod.manifest_url_for(ark),
+        provider_key="gallica",
+        extra_metadata=extra,
+        manifest_payload=manifest,
+    )
+
+
 def _resolve_loc(ref: str, *, cfg: dict[str, Any], cfg_http: dict[str, Any],
                   cache_dir: Any) -> ManifestRef:
     from iiif_utils.providers import loc as loc_mod
@@ -181,10 +218,32 @@ def _resolve_wellcome(ref: str, *, cfg: dict[str, Any], cfg_http: dict[str, Any]
                        cache_dir: Any) -> ManifestRef:
     iiif_base = cfg["providers"]["wellcome"]["iiif_base"]
     if B_NUMBER_RE.match(ref):
+        # Child-manifest b-numbers (`bNNNNNNNN_NNNN`) aren't in the catalogue —
+        # the catalogue only knows the parent. Query the parent for metadata
+        # but address the child manifest by its full identifier.
+        parent_bnum = ref.split("_", 1)[0].lower()
+        manifest_id = ref.lower()
+        extra: dict[str, str] = {}
+        if "_" in ref:
+            # Augment with parent metadata when available (best-effort).
+            try:
+                catalogue_api = cfg["providers"]["wellcome"]["catalogue_api"]
+                parent_work_url = (
+                    f"{catalogue_api}/works?identifiers.value={parent_bnum}"
+                    f"&include=identifiers,items,subjects,contributors,"
+                    f"production,languages"
+                )
+                resp = http_.fetch_json(parent_work_url, cfg_http=cfg_http,
+                                          cache_dir=cache_dir)
+                results = resp.get("results", []) if isinstance(resp, dict) else []
+                if results:
+                    extra = _wellcome_extra_metadata(results[0])
+            except Exception:
+                pass  # metadata-augmentation is best-effort
         return ManifestRef(
-            manifest_url=f"{iiif_base}/presentation/{ref.lower()}",
+            manifest_url=f"{iiif_base}/presentation/{manifest_id}",
             provider_key="wellcome",
-            extra_metadata={},
+            extra_metadata=extra,
         )
 
     # Otherwise assume it's a catalogue work ID: resolve to a b-number.
@@ -213,7 +272,18 @@ def _resolve_wellcome(ref: str, *, cfg: dict[str, Any], cfg_http: dict[str, Any]
     if not bnum:
         raise ValueError(f"Wellcome work {ref!r} has no b-number / IIIF location.")
 
-    extra = {
+    extra = _wellcome_extra_metadata(work)
+
+    return ManifestRef(
+        manifest_url=f"{iiif_base}/presentation/{bnum}",
+        provider_key="wellcome",
+        extra_metadata=extra,
+    )
+
+
+def _wellcome_extra_metadata(work: dict[str, Any]) -> dict[str, str]:
+    """Flatten a Wellcome catalogue work record into doc-metadata fields."""
+    extra: dict[str, str] = {
         "catalogue_id": work.get("id", ""),
         "catalogue_title": work.get("title", ""),
     }
@@ -238,9 +308,4 @@ def _resolve_wellcome(ref: str, *, cfg: dict[str, Any], cfg_http: dict[str, Any]
         idtype = ident.get("identifierType", {}).get("id", "")
         if idtype:
             extra[f"identifier:{idtype}"] = ident.get("value", "")
-
-    return ManifestRef(
-        manifest_url=f"{iiif_base}/presentation/{bnum}",
-        provider_key="wellcome",
-        extra_metadata=extra,
-    )
+    return extra

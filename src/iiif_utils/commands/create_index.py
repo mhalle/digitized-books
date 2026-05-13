@@ -58,10 +58,11 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
                        cache_dir=cache_dir)
     log.info(f"resolved → {ref_obj.manifest_url} (provider={ref_obj.provider_key})")
 
-    # Per-provider config overrides — currently we use this for LoC's
-    # tighter rate-limit (max_concurrency).
+    # Per-provider config overrides — used to honor host-specific
+    # rate-limits (LoC's tight 429 ceiling, Gallica's hard ~5 req/s cap).
     provider_cfg = (cfg.get("providers") or {}).get(ref_obj.provider_key) or {}
-    for k in ("max_concurrency", "max_retries", "retry_base_seconds"):
+    for k in ("max_concurrency", "max_retries", "retry_base_seconds",
+               "request_interval_seconds"):
         if k in provider_cfg:
             cfg_http[k] = provider_cfg[k]
 
@@ -89,8 +90,35 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
 
     # Slug and output path
     title = manifest_mod.label_string(manifest.get("label")) or ref_obj.manifest_url
-    bnum_match = re.search(r"/(b\d{7}[\dx])(?:$|[/?])", ref_obj.manifest_url)
-    identifier = bnum_match.group(1) if bnum_match else slugify(ref_obj.manifest_url)[:30]
+    # Wellcome manifests: capture b-number plus optional child-volume suffix
+    # (`b22396147_0003`, `b20416301_001`). Without the suffix every volume
+    # of a multi-volume Collection would collide on a single filename.
+    bnum_match = re.search(r"/(b\d{7}[\dx](?:_\d{3,4})?)(?:$|[/?])",
+                            ref_obj.manifest_url)
+    # Identifier preference, in order:
+    # 1. Wellcome b-number in manifest URL (handles Wellcome with no extra_metadata)
+    # 2. Provider-supplied identifier in extra_metadata (heidelberg_diglit,
+    #    bsb, gallica_ark, lccn, etc.) — preferred for non-Wellcome providers
+    #    since slugifying the manifest URL produces nonsense like
+    #    "httpsgallicabnffriiifark12148b".
+    # 3. Fallback: slugified manifest URL truncated to 30 chars.
+    identifier: str
+    if bnum_match:
+        identifier = bnum_match.group(1)
+    else:
+        identifier = ""
+        for key in (
+            "identifier:gallica_ark",
+            "identifier:heidelberg_diglit",
+            "identifier:bsb",
+            "identifier:lccn",
+        ):
+            val = ref_obj.extra_metadata.get(key)
+            if val:
+                identifier = slugify(str(val), max_len=30)
+                break
+        if not identifier:
+            identifier = slugify(ref_obj.manifest_url)[:30]
     slug = f"{ref_obj.provider_key}_{slugify(title, max_len=40)}_{identifier}"
     if output_path is None:
         output_dir.mkdir(parents=True, exist_ok=True)

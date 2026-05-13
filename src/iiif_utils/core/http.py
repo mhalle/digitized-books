@@ -105,16 +105,41 @@ async def fetch_many_bytes(
     suffix: str = "",
     on_progress: Any = None,
 ) -> dict[str, bytes]:
-    """Concurrent fetch with file cache + 429/5xx retry. Returns {url: bytes}."""
+    """Concurrent fetch with file cache + 429/5xx retry. Returns {url: bytes}.
+
+    Honors three pacing knobs in `cfg_http`:
+      - `max_concurrency` (default 8) — semaphore-bounded parallelism
+      - `request_interval_seconds` (default 0) — minimum delay between
+        the *start* of consecutive uncached requests. Use this for hosts
+        that rate-limit on requests-per-second rather than concurrent
+        connections (e.g. Gallica).
+      - `max_retries` / `retry_base_seconds` — exponential-backoff retry
+        budget on 429 / 5xx
+    """
     headers = {"User-Agent": cfg_http.get("user_agent", "iiif-utils/0.1")}
     timeout = httpx.Timeout(float(cfg_http.get("timeout_seconds", 60)))
     concurrency = int(cfg_http.get("max_concurrency", 8))
     max_retries = int(cfg_http.get("max_retries", 8))
     base_backoff = float(cfg_http.get("retry_base_seconds", 0.5))
+    interval = float(cfg_http.get("request_interval_seconds", 0.0))
     # Retry classes: 429 = rate-limited; 5xx = any server-side hiccup,
     # covering Cloudflare-specific 520-527 codes that LoC's edge emits.
     sem = asyncio.Semaphore(concurrency)
+    # Single global pacing lock — when set, requests serialize through it
+    # so that `interval` actually paces wall-clock request starts.
+    pacer_lock = asyncio.Lock() if interval > 0 else None
+    last_request_time = [0.0]  # mutable cell for the closure
     out: dict[str, bytes] = {}
+
+    async def pace() -> None:
+        if pacer_lock is None:
+            return
+        loop = asyncio.get_event_loop()
+        async with pacer_lock:
+            wait = last_request_time[0] + interval - loop.time()
+            if wait > 0:
+                await asyncio.sleep(wait)
+            last_request_time[0] = loop.time()
 
     async def one(client: httpx.AsyncClient, url: str) -> None:
         if cache_dir is not None:
@@ -126,6 +151,7 @@ async def fetch_many_bytes(
                 return
         for attempt in range(max_retries + 1):
             async with sem:
+                await pace()
                 try:
                     r = await client.get(url)
                 except (httpx.RemoteProtocolError, httpx.ReadError,
