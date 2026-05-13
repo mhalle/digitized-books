@@ -17,6 +17,10 @@ from iiif_utils.commands.info import info
 from iiif_utils.commands.list_figures import list_figures
 from iiif_utils.commands.list_files import list_files
 from iiif_utils.commands.ocr_page import ocr_page
+from iiif_utils.commands.outline_clear import outline_clear
+from iiif_utils.commands.outline_import import outline_import
+from iiif_utils.commands.outline_list import outline_list
+from iiif_utils.commands.outline_status import outline_status
 from iiif_utils.commands.rebuild_index import rebuild_index
 from iiif_utils.commands.search_catalog import search_catalog
 from iiif_utils.commands.search_index import search_index
@@ -57,6 +61,10 @@ cli.add_command(get_region)
 cli.add_command(get_text)
 cli.add_command(get_url)
 cli.add_command(list_figures)
+cli.add_command(outline_import)
+cli.add_command(outline_list)
+cli.add_command(outline_status)
+cli.add_command(outline_clear)
 
 
 if __name__ == "__main__":

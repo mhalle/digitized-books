@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "https://iiif-utils/outline_schema.json",
+  "title": "iiif-utils derived_outline import payload",
+  "description": "JSON payload accepted by `iiif-utils outline-import`. Each work gets one payload; entries are a tree of self-contained nodes, each carrying its own canvas range. See docs/OUTLINE.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["work", "entries"],
+  "properties": {
+    "work": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The work's canonical id, matching the value returned by `outline.work_id()` on the target db (which probes the provider-specific identifier keys stored in document_metadata)."
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Top-level entries. Each entry's `level` must be 0 (root); children nest under via `children`.",
+      "items": { "$ref": "#/definitions/entry" }
+    }
+  },
+  "definitions": {
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "title", "canvas_start", "canvas_end"],
+      "properties": {
+        "level": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Depth in the tree. Top-level entries are 0; each level of nesting adds 1. Must equal the nesting depth — redundant with the tree shape, but kept explicit so each row stands alone."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Native heading as the work announces it, verbatim. May be 'CONTENTS', 'Inhalt', 'Chapter VI — The Spinal Cord', 'Plate XI', 'Liber I, Caput III'. No normalization."
+        },
+        "canvas_start": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "First canvas (page_numbers.leaf_num) of this entry's range."
+        },
+        "canvas_end": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Last canvas of this entry's range. Must be >= canvas_start."
+        },
+        "printed_page_start": {
+          "type": ["integer", "string", "null"],
+          "description": "Printed page label where this entry begins. Usually an arabic page number (integer), but may be a string for Roman-numeral supplements ('VII'), letter-paginated front matter ('a', 'g'), or plate labels ('Planche 1', 'Tafel I-X'). Null when no printed label exists."
+        },
+        "printed_page_end": {
+          "type": ["integer", "string", "null"],
+          "description": "Printed page label where this entry ends. Same type rules as printed_page_start. Typically derived by the resolver from the entry's canvas_end via reverse-lookup into the page_numbers table."
+        },
+        "notes": {
+          "type": ["string", "null"],
+          "description": "Short human-readable caveat. For things like 'synthetic root, work has no titled heading', 'TOC printed as 10⁰, interpolated as 109', 'extracted from caption on canvas 47'. Not for prose summaries or queryable provenance taxonomy. NULL is the common case."
+        },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/entry" },
+          "description": "Nested sub-entries. Each child's [canvas_start, canvas_end] must lie within this entry's range. Omit or pass [] for leaf entries."
+        }
+      }
+    }
+  }
+}

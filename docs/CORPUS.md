@@ -39,7 +39,7 @@ These are the workhorses. Long-form prose, comprehensive coverage of human gross
 | ★ | Cunningham's Text-book of Anatomy, 4th ed (Robinson rev.) | `cfn934u3` | 1914 | pdm | The British counterpart to Morris's. Latest pre-WWI mature edition. |
 | | Cunningham's Text-book, 1st ed | `wxh98zsn` | 1902 | inc → PD override | Earlier; skip. |
 | | Cunningham's Text-book, partial | `ppy5p9uc` | 1906 | inc → PD override | Section 2 only — skip. |
-| ★ | Cunningham's Manual of Practical Anatomy (Robinson rev., 6th ed.) | `kw6vt8gv` | 1914 | inc → PD override: pre-1929 US PD | Dissection-room companion. The Manual is a **2-volume work** (Vol. 1: limbs; Vol. 2: thorax/abdomen/head/neck/brain), and the Wellcome IIIF manifest **contains both volumes concatenated as a single sequence** (752 canvases, with two "Cover" structural ranges marking the volume break). When ingesting, identify the boundary by the second "Cover" range. The 1920 BHL edition (BHL title 30040) is a close alternative if you want the post-WWI revision. |
+| ★ | Cunningham's Manual of Practical Anatomy (Robinson rev., 6th ed.) | `kw6vt8gv` | 1914 | inc → PD override: pre-1929 US PD | Dissection-room companion. The work was originally published as 2 volumes (Vol. 1: limbs; Vol. 2: thorax/abdomen/head/neck/brain). The Wellcome scan is **752 canvases with continuous pagination** (body p.1–681 then index p.652+) — there is no internal Title-Page/Cover marking a volume boundary, so the IIIF view is best treated as one continuous text. Earlier CORPUS draft asserting "two 'Cover' ranges mark the volume break" was wrong — the two Cover ranges are the outer front/back covers of the bound volume. 34 duplicate page-number pairs in the page_numbers table are plate fold-out scans, not volume restarts. The 1920 BHL edition (BHL title 30040) is a close alternative if you want the post-WWI revision. |
 | | Cunningham's Manual, earlier scanned eds | `eax5b5u2` (1907 4th, 644 canvases) / `m9e7nadd` (1912 5th, 726 canvases) | | mixed | Same 2-vol-concatenated structure. Skip. |
 | | Cunningham's Manual, 1893–1903 records | `cnk4dsek` (1889 2nd), `t6m83dvf`/`m6beaqws` (1893–94 1st), `ekyc32zt` (1903 3rd) | | pdm | **Bibliographic-only records — no digitized scan.** Wellcome lists them as online but the IIIF manifest has 0 canvases. Skip. |
 | ★ | Piersol's Human Anatomy | `mvaqfjxm` | 1918 | pdm | Major American multi-volume textbook. |
@@ -70,7 +70,7 @@ For atlases the OCR value is in captions and indices; the corpus value is in pla
 | ★ | Sobotta, *Atlas of Human Anatomy* (English, McMurrich tr.) | `kdckv24y` | 1927–28 | pdm | English McMurrich translation makes captions accessible without German. |
 | | Sobotta, *Atlas der deskriptiven Anatomie* (German) | `dy48h43b` (1926–28) | 1926–28 | pdm | Skip if you have the McMurrich English; keep ONE German if you want bilingual indexing. Other German eds (`kkyzwwjs` 1919–20, `h9fafua2` 1922) — skip. |
 | ★ | Toldt, *Anatomischer Atlas*, latest pre-1929 | `tgekje3p` | 1919–20 | pdm | Pick the latest. Earlier eds (`u6sgj27q` 1900, `ruxbq7j8` 1903, `snc7atr4` 1914) — skip. |
-| ★ | Bourgery & Jacob, *Traité complet de l'anatomie* | `p747b7vs` (Wellcome); Heidelberg `bourgery1831ga` (hub) | 1831–54 | pdm | The 8-volume French illustrated treatise (text + 700+ hand-colored lithographs by N.H. Jacob). **Earlier CORPUS draft incorrectly described as "plates only"** — Wellcome serves the work as 14 child manifests covering ~5,140 canvases of both prose volumes (Tome 1–6 text) and plate volumes (Tome 1–8 atlases). **Wellcome ALTO is structurally broken** (every ALTO URL returns 500) so Wellcome indexes are image-only (`create-index --no-ocr`, 14 sqlites under `p747b7vs_v1..v14`). **Heidelberg has the matching 1st edition with clean ALTO** — 8 text vols (`bourgery1832bd1_1` ... `bourgery1854bd8_1` plus the typo-spelled `bourgey1832bd1_1`) and 8 atlas vols (`bourgey1831bd1_2` ... `bourgey1844bd8_2`); the atlas vols carry the colored chromolithographs in higher fidelity than Wellcome's grayscale scans. Use the Heidelberg indexes for FTS and the colored plate images; the Wellcome indexes remain as a second-copy reference. ~1,032 "Planche N" labeled canvases across the 8 Heidelberg atlas vols (~1,225 plate canvases adjusting for Bd. 3's letter-only labeling), ~15.1M chars of French OCR across the text vols. |
+| ★ | Bourgery & Jacob, *Traité complet de l'anatomie* | `p747b7vs` (Wellcome); Heidelberg `bourgery1831ga` (hub) | 1831–54 | pdm | The 8-volume French illustrated treatise (text + 700+ hand-colored lithographs by N.H. Jacob). **Earlier CORPUS draft incorrectly described as "plates only"** — Wellcome serves the work as 14 child manifests covering ~5,140 canvases of both prose volumes (Tome 1–6 text) and plate volumes (Tome 1–8 atlases). **Wellcome ALTO is structurally broken** (every ALTO URL returns 500) so Wellcome indexes are image-only (`create-index --no-ocr`, 14 sqlites under `p747b7vs_v1..v14`). **Heidelberg has the matching 1st edition with clean ALTO** — 8 text vols (`bourgery1832bd1_1` ... `bourgery1854bd8_1` plus the typo-spelled `bourgey1832bd1_1`) and 8 atlas vols (`bourgey1831bd1_2` ... `bourgey1844bd8_2`); the atlas vols carry the colored chromolithographs in higher fidelity than Wellcome's grayscale scans. **Heidelberg is canonical for Bourgery; Wellcome's 14 image-only indexes are a redundancy mirror only (kept on disk in case Heidelberg goes offline) and are excluded from the active corpus** — see "What's actually indexed" below. ~1,032 "Planche N" labeled canvases across the 8 Heidelberg atlas vols (~1,225 plate canvases adjusting for Bd. 3's letter-only labeling), ~15.1M chars of French OCR across the text vols. |
 
 ## Tier 4 — early modern foundational works (Tier 4 because heavy in Latin and visual)
 
@@ -185,6 +185,7 @@ ALTO coverage across ★ picks audited 2026-05-11
    - **Partial digitizations**: e.g. Cunningham *Text-book* 1906 (`ppy5p9uc`) is explicitly "Section 2" only — pages 316-811. Title carries the warning but the work-record can read as a normal record.
    - **Multi-volume sets concatenated into one manifest**: e.g. Cunningham *Manual* 1914 (`kw6vt8gv`) is a 2-volume work served as one 752-canvas manifest. The volume break is identifiable by the second "Cover" entry in the manifest's `structures` array. When chunking for indexing, splitting at the second "Cover" gives you clean per-volume boundaries. The `physicalDescription` field saying "volumes" (plural) is the bibliographic hint.
    - **Multi-volume sets exposed as IIIF Collections** (not concatenated manifests): e.g. Piersol `mvaqfjxm` resolves to a Collection of 2 child manifests; Bourgery `p747b7vs` to a Collection of 14; Quain, Spalteholz, Sappey, Toldt, Sobotta English/Histo, Cajal *Histologie* (×2 duplicate records) similarly. `iiif-utils create-index` refuses Collections directly; use `get-pages --manifest <ID> --child N` to inspect, or expand the Collection and run `create-index` per child.
+   - **Redundant scans within a Collection.** Some Wellcome Collections contain two distinct scans of the same physical volume — different microfilm sources, different scan dates, slightly different canvas counts, but identical body content. Discovered during outlining: Quain's `gw75hbbr_v2` (444 canvases) and `gw75hbbr_v3` (468 canvases) both encode Vol III: The Nervous System — same TOC, same body, different scans. `_v3` outline was cleared after this was confirmed; outline `_v2` is the kept copy. When outlining a Wellcome Collection child, sanity-check against sibling children before producing a payload — if the TOC is identical, the work is a redundant scan and need not be outlined separately.
    - **Duplicate bibliographic records.** Cajal *Histologie* is on Wellcome under two work IDs (`cfbxq8k8` / `akfqm42j`, b-numbers `b2129592x` / `b21270879`) — the same 2-volume scan with mirror-imaged page-number metadata completeness. Cherry-pick `cfbxq8k8_v1` + `akfqm42j_v2` for the better-cataloged half of each volume. CORPUS.md row notes this explicitly.
 
 7. **Heidelberg University Library (digi.ub.uni-heidelberg.de)** added as a provider (`-P heidelberg`) for the Bourgery rescue. Heidelberg manifests are IIIF v2 with per-page ALTO referenced from a manifest-level METS (not in canvas-level `seeAlso`); the adapter fetches manifest + METS and injects per-canvas ALTO URLs. Clean ABBYY-class OCR with French diacritics preserved. Cataloging quirk: text vols use stem `bourgery...` (two r's), atlas vols use `bourgey...` (one r) — typo preserved in permalinks.
@@ -216,23 +217,27 @@ External ingestion (Gray's 1918, Vesalius full text, Bartels, Tilney, Herrick, E
 
 The corpus has been built out incrementally. Current on-disk state:
 
-**`corpus/wellcome/` — 72 sqlite indexes, 416 MB:**
+**`corpus/wellcome/` — 73 sqlite indexes on disk, 411 MB; 59 in the active corpus, 14 redundancy mirrors:**
 
-- 36 single-manifest works (the bulk of Tier 1–7 ★ picks with full ALTO/FTS)
-- 25 child indexes from Wellcome multi-vol Collections, named `<work_id>_v<N>.sqlite`:
+Active (59 dbs, ~32,496 canvases):
+- 35 single-manifest works (the bulk of Tier 1–7 ★ picks with full ALTO/FTS) — ~19,520 canvases, ~153,530 text blocks, ~10,993 illustration regions, ~50.7M chars
+- 22 child indexes from Wellcome multi-vol Collections, named `<work_id>_v<N>.sqlite`:
   Cajal *Histologie* (`akfqm42j_v2`, `cfbxq8k8_v1` — cherry-picked half; see Tier 5 row),
   Piersol (`mvaqfjxm_v1..v2`), Quain (`gw75hbbr_v1..v4`), Sappey descriptive (`h9n43hma_v1..v4`),
   Spalteholz (`d8quuwxg_v1..v3`), Toldt (`tgekje3p_v1..v3`), Sobotta English (`kdckv24y_v1..v2`),
-  Sobotta Histologie (`v43geect_v1..v2`)
-- 14 Bourgery image-only indexes (`p747b7vs_v1..v14` via `--no-ocr` — ALTO endpoint is broken)
-- 2 metadata-only indexes for pre-1600 works with no ALTO at all (Vesalius *Epitome* `g6b6smge`, Valverde `nrtzmcfn`)
-- Totals: ~39,486 canvases, ~272,103 text blocks, ~18,080 illustration regions
+  Sobotta Histologie (`v43geect_v1..v2`) — ~12,547 canvases, ~108,987 blocks, ~6,147 illus, ~30.9M chars
+- 2 metadata-only indexes for pre-1600 works with no ALTO at all (Vesalius *Epitome* `g6b6smge`, Valverde `nrtzmcfn`) — ~429 canvases
 
-**`corpus/heidelberg/` — 22 sqlite indexes:**
+Redundancy mirror — **excluded from the active corpus, kept on disk only as a fallback if Heidelberg goes offline:**
+- 14 Bourgery image-only indexes (`p747b7vs_v1..v14`, built with `--no-ocr` because the Wellcome ALTO endpoint is broken) — ~5,140 canvases, 0 text. Heidelberg's Bourgery (16 vols below) is canonical: it has clean OCR on the text vols, higher-fidelity colored chromolithographs on the atlas vols, and Wellcome adds nothing retrievable on top. Don't build indexes, embeddings, or cross-references off these dbs unless Heidelberg is down.
+
+Active totals (wellcome): ~32,496 canvases, ~262,517 text blocks, ~17,140 illustration regions, ~81.5M chars of OCR.
+
+**`corpus/heidelberg/` — 22 sqlite indexes, 69 MB:**
 
 - 8 Bourgery text vols (`bourgey1832bd1_1` + `bourgery1834bd2_1`...`bourgery1854bd8_1`) — ~2,312 canvases, ~15.1M chars of French OCR
-- 8 Bourgery atlas vols (`bourgey1831bd1_2`...`bourgey1844bd8_2`) — ~1,485 canvases with the colored chromolithographs and Planche-N labeled plates
-- 6 Henle *Hand-Atlas* vols (`henle1871bd1`...`henle1877bd6`)
+- 8 Bourgery atlas vols (`bourgey1831bd1_2`...`bourgey1844bd8_2`) — ~1,485 canvases with the colored chromolithographs and Planche-N labeled plates, ~2.5M chars of caption/label OCR
+- 6 Henle *Hand-Atlas* vols (`henle1871bd1`...`henle1877bd6`) — ~536 canvases, ~324K chars of caption OCR
 
 **Known unindexed gaps** (external sources flagged earlier): Gray's 1918, Vesalius *Fabrica* 1543/1555 full text, Bartels 1909 (PDF in hand), Tilney & Riley, Herrick, Eycleshymer pair, Sappey 1874, Spalteholz 1898 German.
 
@@ -240,3 +245,5 @@ The corpus has been built out incrementally. Current on-disk state:
 - Hyrtl 1889 (`xugmyg7r`): patchy — most pages clean, some pages mangled with multiple-character drops. Common terms FTS-hit cleanly (`Histologie`, `Anatomie`, `Sinneslehre`); selective pages may need local Tesseract re-OCR.
 - Tier 4 early modern English (Crooke 1618, Cheselden 1733, Albinus 1754): long-s endemic — OCR reads `ſ` as `f` consistently. Search queries on these works need s↔f variant expansion to match modern spellings.
 - Atlas works (Toldt, Sobotta atlases, Albinus plates, Hunter): low average block length because OCR correctly captures figure-callout labels as tiny text_blocks. Not a defect.
+- Atlases / plate-only works where Wellcome's ALTO doesn't tag illustrations: `<Illustration>` regions are absent for Piersol (`mvaqfjxm_v1/v2`), Toldt (`tgekje3p_v1..v3`), Hunter (`wc7gxkcu`), Crooke (`resfyxts`), Cheselden (`jfkydvqm`), Albinus *Tabulae ossium* (`ugz833qz`) and *Tabulae VII* (`t6hqn97a`). Text-block FTS is intact for the prose ones; figure-region retrieval is not possible from the Wellcome ALTO for these works.
+- Plate-heavy works with negligible body text: `t6hqn97a` (Albinus *Tabulae VII*) has only ~8K chars across 87 canvases, `ugz833qz` ~61K, `wc7gxkcu` (Hunter) ~250K (mostly figure callouts), `jfkydvqm` (Cheselden) ~263K. These are visual-primary and will not surface in full-text retrieval against the prose corpus.
