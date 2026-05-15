@@ -147,22 +147,23 @@ These are textbooks I would include in a serious anatomy corpus that are missing
 | Bardeleben *Handbuch* Vols. 2, 3, 4, 6, 8 | Wellcome has individual chapter-volumes (Holl, Krause, Tandler) but not the whole *Handbuch*. BHL has Vols. 1, 5:1, 5:2, 7. **Vol. 3 (Gefässystem) is the most important gap — it contains Bartels' Lymphgefässsystem.** | Vol 1: IA `handbuchderanato11bard`. Other vols not located in this sweep — worth a determined search of HathiTrust and IA from outside. |
 | Cunningham *Manual of Practical Anatomy*, 1920 ed | Wellcome has 1889/1912/1914; this fills the post-WWI edition. | BHL title-id 30040. |
 
-**Review-driven additions (2026-05-13)** — twelve further works flagged by an outside review, availability verified against IA / Gallica / MDZ / HathiTrust. All clean US-PD except where noted. Each row gives a verified IIIF manifest URL (or PDF fallback) so the next ingestion session can act on it.
+**Review-driven additions (2026-05-13/15)** — twelve further works flagged by an outside review, availability verified against IA / Gallica / MDZ / HathiTrust. All clean US-PD except where noted. **6 of 12 ingested + outlined as of 2026-05-15** (marked ✅ in the table). The remaining 6 are IA-only and ride out of `ia-utils` outside this Claude sandbox.
 
 | Missing work | Why include | Where to find (verified) |
 |--------------|-------------|--------------------------|
-| ★ Testut, *Traité d'anatomie humaine*, 1st ed 1899 (Doin, 4 vols) | Canonical French descriptive anatomy of the era; corpus currently leans Anglophone. 1928 8th ed (Testut/Latarjet) also pre-1929 = clean PD. | IA Wellcome scan, vols 1–4: `b21506668_0001..._0004` (manifest `https://iiif.archivelab.org/iiif/b21506668_0004/manifest.json`); 1928 Latarjet ed at IA `testutetlatarjetvol.1..3`. Skip post-1929 9th ed. |
-| ★ Poirier & Charpy, *Traité d'anatomie humaine*, 1896–1907 (Masson, 5 tomes / fascicles) | The other great French traité; source-of-record for Poirier's lymphatic chapters (corpus has only the English Poirier–Cunéo *Lymphatics* tr.). Clean US-PD. | Gallica fascicles with native IIIF (`bpt6k62119026`, `bpt6k42230015`, `bpt6k6212704n` …); IA `n1traitdanatomie03poiruoft`; Wellcome `b21468916_*`. Prefer Gallica for fidelity. |
-| ★ Merkel, *Handbuch der topographischen Anatomie*, 1885–1907 (Vieweg, 3 vols) | Definitive late-19th-c German topographic anatomy; pairs with Hyrtl topographic to bracket the German topographic tradition. Merkel d.1919. | IA Wellcome `b20416301_001..._003` (IIIF manifests); Bd 3 alt `handbuchdertopo00merkgoog`. Plus bonus *Die Anatomie des Menschen* 6-Abt text+atlas (1913–18) at IA `dieanatomiedesme03merk`. |
-| ★ Deaver, *Surgical Anatomy*, 1899–1903 (Blakiston, 3 vols, Philadelphia) | Major American surgical anatomy of the period; corpus's surgical-anatomy axis is thin. Deaver d.1931 but publication pre-1929 → clean PD. | IA `surgicalanatomyt02deav`, `surgicalanatomyt03deavrich`; abridgement *Surgical Anatomy of the Head and Neck* at `surgicalanatomyo00deav`. |
-| ★ Keibel & Mall (eds.), *Manual of Human Embryology*, 1910–12 (Lippincott, 2 vols, English) | Landmark Anglophone embryology compendium; pairs with Arey, Sabin, Huntington for the embryology/development cluster. | IA vol 1 `manualhumanembr00mallgoog`; vol 2 `cu31924024561825`. |
-| ★ Treves & Keith, *Surgical Applied Anatomy*, 6th rev. ed 1913 (Lea Bros.) | Classic British surgical anatomy primer; complements Deaver from the British side. 1883 1st ed not on IA; best PD eds are 1907 and 1913. | IA `cihm_90559` (1913), `surgicalapplieda1907trev` (1907). |
-| Arey, *Developmental Anatomy*, 1st ed 1924 (Saunders) | Definitive American embryology textbook of the inter-war era. Only the 1924 ed is PD; later eds post-1929. | IA `developmentalana01arey` (IIIF manifest available). |
-| Hyrtl, *Handbuch der topographischen Anatomie*, 3rd ed 1857 (Braumüller, 2 vols) | The other great Hyrtl text; complements `xugmyg7r` *Lehrbuch* with regional/topographic depth. Hyrtl d.1894. | IA Wellcome vol 2 `b28137930_0002`; alt scan `handbuchdertopog002hyrt`. |
-| Gegenbaur, *Lehrbuch der Anatomie des Menschen*, 1883 1st ed (Engelmann); later 1888/1899 eds also PD | Comparative-morphological framework — distinct emphasis from descriptive/surgical texts already in corpus. Gegenbaur d.1903. | IA `lehrbuchderanato00gege` (1883); Heidelberg native-IIIF for 1888 ed at `digi.ub.uni-heidelberg.de/diglit/gegenbaur1888`. |
-| ★ Sabin, *The Origin and Development of the Lymphatic System*, 1913 (Johns Hopkins Press) | Foundational developmental-lymphatic monograph (India-ink injection studies); pairs with Sappey 1874 + Huntington 1911 for the lymphatic-development triad. | IA `origindevelopmen00sabiuoft` (IIIF manifest available). |
-| Huntington, *Anatomy and Development of the Systemic Lymphatic Vessels in the Domestic Cat*, 1911 (Wistar Memoir No. 1) | Comparative-mammalian lymphatic anatomy; the alternative developmental-origin school to Sabin (centrifugal vs. centripetal). Huntington d.1927; pub. 1911. | IA `anatomydevelopme01huntuoft` (Toronto scan, IIIF manifest); alts `anatomydevelopme00huntrich`, `anatomyanddevel00huntgoog`. |
-| ✗ Rouvière, *Anatomie des lymphatiques de l'homme*, 1932 (Masson) | 20th-c successor to Sappey; most-cited human lymphatic anatomy of the modern era. **NOT clean US-PD**: pub. 1932 → US PD on 1 Jan 2028 (URAA-restored, 95 yr); PD in France/EU since 2023. Defer ingest in US jurisdiction. | Gallica IIIF verified: `https://gallica.bnf.fr/iiif/ark:/12148/bpt6k323992j/manifest.json` (517 views). Wellcome record `pd4k8vby` also exists. Hold for 2028 unless EU-jurisdiction track. |
+| ✅ ★ Testut, *Traité d'anatomie humaine*, 1899 / 1928 (Doin, 4 vols) | Canonical French descriptive anatomy of the era; corpus currently leans Anglophone. 1928 8th ed (Testut/Latarjet) also pre-1929 = clean PD. | **Ingested + outlined 2026-05-13:** Wellcome `b21506668_0001..._0004` (1670 outline entries, depth 5). Wellcome's Collection mixes editions — vols 1-3 are 1st ed 1899, vol 4 is 4th ed; flagged in entry notes. |
+| ✅ ★ Poirier & Charpy, *Traité d'anatomie humaine*, 1896–1907 (Masson, 5 tomes / 9 fascicules) | The other great French traité; source-of-record for Poirier's lymphatic chapters (corpus has only the English Poirier–Cunéo *Lymphatics* tr.). Clean US-PD. | **Ingested + outlined 2026-05-15:** Wellcome `b21468916_0001..._0009` (1442 outline entries across 9 fascicules: Tome I, Tome II Fasc I-IV, Tome III Fasc I-III, Tome IV Fasc I-III, Tome V Fasc I-II). Multiple page_numbers NULL-row patches needed (v1, v3, v7, v9). |
+| ✅ ★ Merkel, *Handbuch der topographischen Anatomie*, 1885–1907 (Vieweg, 3 vols) | Definitive late-19th-c German topographic anatomy; pairs with Hyrtl topographic to bracket the German topographic tradition. Merkel d.1919. | **Ingested + outlined 2026-05-13/15:** Wellcome `b20416301_001..._003` (480 outline entries: 106 + 180 + 194). Bd 3 has a binding-swap edge case in the physical book. |
+| ★ Deaver, *Surgical Anatomy*, 1899–1903 (Blakiston, 3 vols, Philadelphia) | Major American surgical anatomy of the period; corpus's surgical-anatomy axis is thin. Deaver d.1931 but publication pre-1929 → clean PD. | IA `surgicalanatomyt02deav`, `surgicalanatomyt03deavrich`; abridgement *Surgical Anatomy of the Head and Neck* at `surgicalanatomyo00deav`. **IA-only — run via `ia-utils` outside Claude sandbox.** |
+| ★ Keibel & Mall (eds.), *Manual of Human Embryology*, 1910–12 (Lippincott, 2 vols, English) | Landmark Anglophone embryology compendium; pairs with Arey, Sabin, Huntington for the embryology/development cluster. | IA vol 1 `manualhumanembr00mallgoog`; vol 2 `cu31924024561825`. **IA-only — run via `ia-utils` outside Claude sandbox.** |
+| ★ Treves & Keith, *Surgical Applied Anatomy*, 6th rev. ed 1913 (Lea Bros.) | Classic British surgical anatomy primer; complements Deaver from the British side. 1883 1st ed not on IA; best PD eds are 1907 and 1913. | IA `cihm_90559` (1913), `surgicalapplieda1907trev` (1907). **IA-only — run via `ia-utils` outside Claude sandbox.** |
+| Arey, *Developmental Anatomy*, 1st ed 1924 (Saunders) | Definitive American embryology textbook of the inter-war era. Only the 1924 ed is PD; later eds post-1929. | IA `developmentalana01arey` (IIIF manifest available). **IA-only — run via `ia-utils` outside Claude sandbox.** |
+| ✅ Hyrtl, *Handbuch der topographischen Anatomie*, 3rd ed 1857 (Braumüller, 2 vols) | The other great Hyrtl text; complements `xugmyg7r` *Lehrbuch* with regional/topographic depth. Hyrtl d.1894. | **Ingested + outlined 2026-05-13/15:** Wellcome `b28137930_0001..._0002` (1149 outline entries: 563 + 586, depth 5). 8 Bücher: Kopf/Hals/Brust/Bauch + Becken/Rücken/obere & untere Extremität. |
+| ✅ Gegenbaur, *Lehrbuch der Anatomie des Menschen*, 4th ed 1888 (Engelmann) | Comparative-morphological framework — distinct emphasis from descriptive/surgical texts already in corpus. Gegenbaur d.1903. | **Ingested + outlined 2026-05-13:** Heidelberg `gegenbaur1888` (454 outline entries, depth 7). 1090 canvases, 3618 text_blocks. IA `lehrbuchderanato00gege` (1883 1st ed) remains an alternative. |
+| ★ Sabin, *The Origin and Development of the Lymphatic System*, 1913 (Johns Hopkins Press) | Foundational developmental-lymphatic monograph (India-ink injection studies); pairs with Sappey 1874 + Huntington 1911 for the lymphatic-development triad. | IA `origindevelopmen00sabiuoft` (IIIF manifest available). **IA-only — run via `ia-utils` outside Claude sandbox.** |
+| Huntington, *Anatomy and Development of the Systemic Lymphatic Vessels in the Domestic Cat*, 1911 (Wistar Memoir No. 1) | Comparative-mammalian lymphatic anatomy; the alternative developmental-origin school to Sabin (centrifugal vs. centripetal). Huntington d.1927; pub. 1911. | IA `anatomydevelopme01huntuoft` (Toronto scan, IIIF manifest); alts `anatomydevelopme00huntrich`, `anatomyanddevel00huntgoog`. **IA-only — run via `ia-utils` outside Claude sandbox.** |
+| ✗ Rouvière, *Anatomie des lymphatiques de l'homme*, 1932 (Masson) | 20th-c successor to Sappey; most-cited human lymphatic anatomy of the modern era. **NOT clean US-PD**: pub. 1932 → US PD on 1 Jan 2028 (URAA-restored, 95 yr); PD in France/EU since 2023. | **Attempted but deferred 2026-05-13.** Gallica IIIF works (`https://gallica.bnf.fr/iiif/ark:/12148/bpt6k323992j/manifest.json`, 517 views) but Gallica's req/s throttle defeats the build-outline pipeline even with 4 req/s + 6 retries (synchronized backoff means many in-flight retries pile up). **IA also has the French original** at `anatomie-des-lymphatiques-de-lhomme-...-rouviere-henri` with `djvu.txt` (1.2 MB plain OCR), `djvu.xml` (15 MB), full PDF — pull via `ia-utils` outside sandbox if needed before 2028. Tobias 1938 English tr. is not openly available (Open Library has bibliographic record OL45630136M but no scan). |
+| ✅ ★ Sappey, *Vaisseaux lymphatiques* 1874 (Adrien Delahaye) | Foundational mercury-injection lymphatic atlas; the 19th-c regional drainage reference. Sappey d.1896. | **Ingested + outlined 2026-05-13:** MDZ `bsb00108543` image-only (MDZ doesn't expose hOCR for pre-1900 works). 51 outline entries via canvas-anchor technique. Catalog says 68 Taf. but this BSB scan only contains 48 plates (Pl. I-XLVIII); discrepancy flagged. |
 
 **Removed from this list since the previous draft** — these items I had flagged as missing turned out to be on Wellcome under stale "in-copyright" metadata (PD overrides), now relocated to their proper tier above:
 
@@ -265,7 +266,7 @@ Active totals (wellcome): ~32,496 canvases, ~262,517 text blocks, ~17,140 illust
 - Atlases / plate-only works where Wellcome's ALTO doesn't tag illustrations: `<Illustration>` regions are absent for Piersol (`mvaqfjxm_v1/v2`), Toldt (`tgekje3p_v1..v3`), Hunter (`wc7gxkcu`), Crooke (`resfyxts`), Cheselden (`jfkydvqm`), Albinus *Tabulae ossium* (`ugz833qz`) and *Tabulae VII* (`t6hqn97a`). Text-block FTS is intact for the prose ones; figure-region retrieval is not possible from the Wellcome ALTO for these works.
 - Plate-heavy works with negligible body text: `t6hqn97a` (Albinus *Tabulae VII*) has only ~8K chars across 87 canvases, `ugz833qz` ~61K, `wc7gxkcu` (Hunter) ~250K (mostly figure callouts), `jfkydvqm` (Cheselden) ~263K. These are visual-primary and will not surface in full-text retrieval against the prose corpus.
 
-## Derived navigation outlines (as of 2026-05-13)
+## Derived navigation outlines (as of 2026-05-15)
 
 `derived_outline` is a per-book sqlite table carrying a hierarchical
 outline of the work — chapters, sections, plates, figures, etc., each
@@ -276,11 +277,19 @@ page label. The schema, CLI, and JSON Schema are documented in
 a sqlite index by reading TOC images, body running headers, or figure
 captions.
 
-**75 / 97 indices outlined; 19,133 total entries.** Remaining 22 dbs:
+**95 / 118 indices outlined; 24,379 total entries.** Remaining 23 dbs:
 14 inactive Wellcome Bourgery image-only mirrors (excluded by design —
-Heidelberg is canonical), 3 redundant-scan duplicates already cleared
-(Quain v3 + 2 more), and 5 confirmed bailouts (plate-only atlases /
-pre-1600 stubs — see "Bailed-out works" below).
+Heidelberg is canonical), redundant-scan duplicates already cleared,
+and 5 confirmed bailouts (plate-only atlases / pre-1600 stubs — see
+"Bailed-out works" below).
+
+**Recent additions ingested + outlined (2026-05-13/15):** the
+review-driven batch added Testut (4 vols, 1670 entries), Poirier-Charpy
+(9 vols, 1442), Hyrtl *topographic* (2 vols, 1149), Merkel *topographic*
+(3 vols, 480), Gegenbaur 1888 (454), and Sappey *Vaisseaux lymphatiques*
+1874 (51 via canvas-anchor). New Gallica + child-b-number Wellcome
+support added in commit `a8a3e23` — see "Recent additions" row in the
+gap table for verified manifest URLs.
 
 Three skill techniques in use:
 
