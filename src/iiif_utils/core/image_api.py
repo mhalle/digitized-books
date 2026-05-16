@@ -88,6 +88,32 @@ def resolve_dims(row: Mapping[str, Any], *,
     return iw or cw, ih or ch
 
 
+def resolve_max_size(
+    size: str,
+    service_url: str,
+    *,
+    cfg_http: dict[str, Any],
+    cache_dir: Path | None = None,
+) -> str:
+    """If `size == 'max'`, fetch `info.json` and return `'{width},'`.
+
+    Some IIIF servers (notably Wellcome) reject the canonical
+    `full/full/0/default.jpg` URL with HTTP 403 when the source image
+    exceeds their `max_pixels` threshold, even though the same image
+    is fetchable via an explicit width like `full/2734,/0/default.jpg`.
+    `--size max` is the workaround: resolve to the native width.
+
+    Other size strings pass through unchanged.
+    """
+    if size != "max":
+        return size
+    info = fetch_info_json(service_url, cfg_http=cfg_http, cache_dir=cache_dir)
+    w, _ = dims_from_info(info)
+    if not w:
+        return "full"  # fallback: best effort
+    return f"{w},"
+
+
 def region_url(
     service_url: str,
     bbox: tuple[int, int, int, int] | None = None,

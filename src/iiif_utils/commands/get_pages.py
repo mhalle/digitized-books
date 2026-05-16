@@ -191,7 +191,9 @@ def _resolve_manifest_canvases(
 @click.option("--grid", "grid", is_flag=True, default=False,
               help="Draw grid lines between mosaic tiles.")
 @click.option("--size", default="1400,",
-              help="IIIF size string. Aliases: small,medium,large,full.")
+              help="IIIF size string. Aliases: small,medium,large,full,max."
+                   " 'max' resolves to each source's native width via info.json"
+                   " (use this if a server rejects '/full/full/').")
 @click.option("--format", "fmt", default="jpg")
 @click.option("--url-only", is_flag=True, default=False)
 @click.option("-j", "--jobs", "jobs", type=int, default=None,
@@ -248,7 +250,7 @@ def get_pages(index: Path | None, manifest_ref: str | None,
         )
 
     aliases = {"small": "400,", "medium": "800,", "large": "1600,",
-               "full": "full"}
+               "full": "full", "max": "max"}
     # Mosaic tiles get downsampled to ~128px wide anyway; use 'small'
     # as the default so we don't waste bandwidth on big originals.
     if as_mosaic and size == "1400,":
@@ -289,8 +291,14 @@ def get_pages(index: Path | None, manifest_ref: str | None,
     for i in wanted:
         if i not in by_idx:
             continue
+        # 'max' resolves per-canvas via info.json (each canvas has its own
+        # native width). Other sizes pass through unchanged.
+        eff_size = (image_api.resolve_max_size(size, by_idx[i],
+                                                cfg_http=cfg_http,
+                                                cache_dir=cache_dir)
+                    if size == "max" else size)
         urls.append((i, image_api.region_url(by_idx[i], None,
-                                              size=size, fmt=fmt)))
+                                              size=eff_size, fmt=fmt)))
 
     if url_only:
         for _i, u in urls:

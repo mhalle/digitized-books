@@ -23,7 +23,10 @@ from iiif_utils.core import image_api
 @click.option("--bbox", "bbox_str", default=None,
               help="With --region: 'x0,y0,x1,y1' image-pixel bbox.")
 @click.option("--size", default="full",
-              help="IIIF size string (default 'full'). Aliases: small,medium,large.")
+              help="IIIF size string (default 'full'). Aliases:"
+                   " small,medium,large,max. 'max' resolves to the source's"
+                   " native width via info.json (use this if a server rejects"
+                   " '/full/full/').")
 @click.option("--format", "fmt", default="jpg")
 @click.option("--padding", default=None,
               help="Pad the bbox (with --figure or --region). Symmetric: "
@@ -45,7 +48,8 @@ def get_url(index: Path, leaf_num: int | None, ill_num: int | None,
              bbox_str: str | None, size: str, fmt: str,
              padding: str | None, mode: str) -> None:
     """Emit a URL — no download."""
-    aliases = {"small": "400,", "medium": "800,", "large": "1600,"}
+    aliases = {"small": "400,", "medium": "800,", "large": "1600,",
+               "max": "max"}
     size = aliases.get(size, size)
 
     conn = sqlite3.connect(f"file:{index}?mode=ro", uri=True)
@@ -100,6 +104,18 @@ def get_url(index: Path, leaf_num: int | None, ill_num: int | None,
     if mode == "info":
         click.echo(image_api.info_json_url(service))
         return
+
+    # 'max' needs info.json to expand to '{width},' — load http cfg if not
+    # already loaded for --padding.
+    if size == "max":
+        if not cfg_http:
+            from iiif_utils.config import load_config
+            cfg_http = load_config().get("http", {})
+            cache_dir = Path(cfg_http.get(
+                "cache_dir", "./.iiif-cache")).expanduser()
+        size = image_api.resolve_max_size(size, service,
+                                           cfg_http=cfg_http,
+                                           cache_dir=cache_dir)
 
     if mode == "image":
         click.echo(image_api.region_url(service, None, size=size, fmt=fmt))

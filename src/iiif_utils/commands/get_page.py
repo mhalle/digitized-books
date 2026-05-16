@@ -22,7 +22,9 @@ from iiif_utils.utils.page import resolve_leaf
 @click.option("-o", "--output", "output_path",
               type=click.Path(dir_okay=False, path_type=Path), default=None)
 @click.option("--size", default="1400,",
-              help="IIIF size string. Aliases: small,medium,large,full.")
+              help="IIIF size string. Aliases: small,medium,large,full,max."
+                   " 'max' resolves to the source's native width via info.json"
+                   " (use this if a server rejects '/full/full/').")
 @click.option("--format", "fmt", default="jpg")
 @click.option("--url-only", is_flag=True, default=False)
 @click.option("--config", "config_path", type=click.Path(path_type=Path),
@@ -32,7 +34,7 @@ def get_page(index: Path, leaf_num: int | None, book: str | None,
               url_only: bool, config_path: Path | None) -> None:
     """Download a whole canvas image."""
     aliases = {"small": "400,", "medium": "800,", "large": "1600,",
-               "full": "full"}
+               "full": "full", "max": "max"}
     size = aliases.get(size, size)
 
     cfg = load_config(config_path)
@@ -46,6 +48,8 @@ def get_page(index: Path, leaf_num: int | None, book: str | None,
     if not row or not row["image_service_url"]:
         raise click.ClickException(f"Canvas {leaf_num} has no image_service_url.")
 
+    size = image_api.resolve_max_size(size, row["image_service_url"],
+                                       cfg_http=cfg.get("http", {}))
     url = image_api.region_url(row["image_service_url"], None,
                                  size=size, fmt=fmt)
     if url_only:

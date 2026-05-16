@@ -367,6 +367,31 @@ def test_region_url_full():
     assert url == "https://example.org/image/x/full/full/0/default.jpg"
 
 
+def test_resolve_max_size_passes_through(monkeypatch):
+    # Non-'max' sizes never trigger an info.json fetch.
+    def explode(*a, **kw):
+        raise AssertionError("fetch_info_json must not be called")
+    monkeypatch.setattr(image_api, "fetch_info_json", explode)
+    assert image_api.resolve_max_size("800,", "https://x/y",
+                                        cfg_http={}) == "800,"
+    assert image_api.resolve_max_size("full", "https://x/y",
+                                        cfg_http={}) == "full"
+
+
+def test_resolve_max_size_expands_to_native_width(monkeypatch):
+    # 'max' fetches info.json and substitutes '{width},'.
+    monkeypatch.setattr(image_api, "fetch_info_json",
+                        lambda url, **kw: {"width": 2734, "height": 4485})
+    assert image_api.resolve_max_size("max", "https://x/y",
+                                        cfg_http={}) == "2734,"
+
+
+def test_resolve_max_size_falls_back_on_missing_width(monkeypatch):
+    monkeypatch.setattr(image_api, "fetch_info_json", lambda url, **kw: {})
+    assert image_api.resolve_max_size("max", "https://x/y",
+                                        cfg_http={}) == "full"
+
+
 def test_padded_bbox_clamps():
     out = image_api.padded_bbox((100, 100, 200, 200), 50,
                                   canvas_w=210, canvas_h=210)
@@ -709,6 +734,86 @@ def test_heidelberg_provider_guessed_from_url():
     assert _guess_provider(
         "https://digi.ub.uni-heidelberg.de/diglit/bourgery1834bd2_1", cfg,
     ) == "heidelberg"
+
+
+def test_ia_parse_ref():
+    from iiif_utils.providers.internet_archive import parse_ref
+    assert parse_ref("anatomyofhumanbo1918gray") == "anatomyofhumanbo1918gray"
+    assert parse_ref("cihm_90559") == "cihm_90559"
+    assert parse_ref("cu31924024790648") == "cu31924024790648"
+    assert parse_ref(
+        "https://archive.org/details/anatomyofhumanbo1918gray"
+    ) == "anatomyofhumanbo1918gray"
+    assert parse_ref(
+        "https://archive.org/details/anatomyofhumanbo1918gray/page/n5"
+    ) == "anatomyofhumanbo1918gray"
+    assert parse_ref(
+        "https://archive.org/download/anatomyofhumanbo1918gray/"
+        "anatomyofhumanbo1918gray_djvu.txt"
+    ) == "anatomyofhumanbo1918gray"
+    assert parse_ref(
+        "https://iiif.archive.org/iiif/anatomyofhumanbo1918gray/manifest.json"
+    ) == "anatomyofhumanbo1918gray"
+    assert parse_ref(
+        "https://iiif.archive.org/iiif/anatomyofhumanbo1918gray$0/manifest.json"
+    ) == "anatomyofhumanbo1918gray"
+    # Unrecognized URL hosts return None.
+    assert parse_ref("https://example.com/x") is None
+    # Too short fails the heuristic.
+    assert parse_ref("ab") is None
+
+
+def test_ia_manifest_url():
+    from iiif_utils.providers.internet_archive import manifest_url_for
+    assert manifest_url_for("anatomyofhumanbo1918gray") == (
+        "https://iiif.archive.org/iiif/anatomyofhumanbo1918gray/manifest.json"
+    )
+
+
+def test_ia_extra_metadata():
+    from iiif_utils.providers.internet_archive import extra_metadata_for
+    manifest = {
+        "metadata": [
+            {"label": {"none": ["title"]}, "value": {"none": ["Anatomy"]}},
+            {"label": {"none": ["creator"]},
+             "value": {"none": ["Gray, Henry", "Lewis, W. H."]}},
+        ],
+        "seeAlso": [
+            {"id": "https://archive.org/metadata/anatomyofhumanbo1918gray",
+             "format": "application/json", "type": "Metadata"},
+            {"id": "https://archive.org/download/anatomyofhumanbo1918gray/"
+                   "anatomyofhumanbo1918gray_page_numbers.json",
+             "format": "application/json"},
+            {"id": "https://archive.org/download/anatomyofhumanbo1918gray/"
+                   "anatomyofhumanbo1918gray_hocr_pageindex.json.gz",
+             "format": "application/json"},
+        ],
+    }
+    out = extra_metadata_for(manifest, "anatomyofhumanbo1918gray")
+    assert out["identifier:ia"] == "anatomyofhumanbo1918gray"
+    assert out["ia_details_url"] == (
+        "https://archive.org/details/anatomyofhumanbo1918gray"
+    )
+    assert out["manifest_metadata:title"] == "Anatomy"
+    assert out["manifest_metadata:creator"] == "Gray, Henry | Lewis, W. H."
+    assert "page_numbers.json" in out["ia_page_numbers_url"]
+    assert "hocr_pageindex" in out["ia_hocr_pageindex_url"]
+    assert "/metadata/" in out["ia_metadata_api_url"]
+
+
+def test_ia_provider_guessed_from_url():
+    from iiif_utils.providers import _guess_provider
+    cfg = {"default_provider": "generic"}
+    assert _guess_provider(
+        "https://archive.org/details/anatomyofhumanbo1918gray", cfg,
+    ) == "ia"
+    assert _guess_provider(
+        "https://iiif.archive.org/iiif/anatomyofhumanbo1918gray/manifest.json",
+        cfg,
+    ) == "ia"
+    assert _guess_provider(
+        "https://archive.org/download/foo/bar.pdf", cfg,
+    ) == "ia"
 
 
 def test_alto_minimal_parse():
