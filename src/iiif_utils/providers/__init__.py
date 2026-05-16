@@ -68,6 +68,13 @@ def resolve(ref: str, *, cfg: dict[str, Any], explicit_provider: str | None = No
         return _resolve_gallica(ref, cfg=cfg, cfg_http=cfg_http,
                                  cache_dir=cache_dir)
 
+    # Internet Archive — thin v3 viewer adapter. No OCR injection; IA
+    # serves a single monolithic hOCR file, not per-canvas. For full-text
+    # indexing of IA items, use the sibling ia-utils package.
+    if provider_key == "ia":
+        return _resolve_ia(ref, cfg=cfg, cfg_http=cfg_http,
+                            cache_dir=cache_dir)
+
     if ref.startswith(("http://", "https://")):
         return ManifestRef(
             manifest_url=ref,
@@ -101,6 +108,10 @@ def _guess_provider(ref: str, cfg: dict[str, Any]) -> str:
         # the RequestDigitalElement endpoint per folio number.
         if host == "gallica.bnf.fr":
             return "gallica"
+        # Internet Archive — details/download/iiif hostnames all route
+        # to the ia provider (viewing/cropping only; not indexing).
+        if host in ("archive.org", "www.archive.org", "iiif.archive.org"):
+            return "ia"
         # Hostname → provider key, if any configured provider declares an iiif_base
         for key, p in (cfg.get("providers") or {}).items():
             base = p.get("iiif_base")
@@ -187,6 +198,27 @@ def _resolve_gallica(ref: str, *, cfg: dict[str, Any],
     return ManifestRef(
         manifest_url=g_mod.manifest_url_for(ark),
         provider_key="gallica",
+        extra_metadata=extra,
+        manifest_payload=manifest,
+    )
+
+
+def _resolve_ia(ref: str, *, cfg: dict[str, Any], cfg_http: dict[str, Any],
+                 cache_dir: Any) -> ManifestRef:
+    from iiif_utils.providers import internet_archive as ia_mod
+    ident = ia_mod.parse_ref(ref)
+    if not ident:
+        raise ValueError(
+            f"Cannot extract Internet Archive identifier from {ref!r} — "
+            f"pass an identifier like 'anatomyofhumanbo1918gray' or a URL "
+            f"like 'https://archive.org/details/anatomyofhumanbo1918gray'."
+        )
+    manifest = ia_mod.fetch_manifest(ident, cfg_http=cfg_http,
+                                       cache_dir=cache_dir)
+    extra = ia_mod.extra_metadata_for(manifest, ident)
+    return ManifestRef(
+        manifest_url=ia_mod.manifest_url_for(ident),
+        provider_key="ia",
         extra_metadata=extra,
         manifest_payload=manifest,
     )

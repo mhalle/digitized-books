@@ -55,6 +55,17 @@ request_interval_seconds = 0.25
 max_retries = 6
 retry_base_seconds = 1.0
 
+[providers.ia]
+type = "ia"
+iiif_base = "https://iiif.archive.org"
+# Internet Archive has IIIF v3 manifests with Image API v3 services, but
+# hOCR is served as one monolithic file per item (not per canvas), so
+# this adapter does NOT inject per-canvas OCR seeAlso. The iiif-utils
+# indexing pipeline expects per-canvas OCR; for full-text indexing of
+# IA items, use the sibling ia-utils package, which consumes IA's
+# native searchtext + pageindex fast path.
+ocr_preference = []
+
 [http]
 user_agent = "iiif-utils/0.1"
 timeout_seconds = 60
