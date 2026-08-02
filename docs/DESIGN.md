@@ -553,8 +553,64 @@ per canvas: `block_number=0`, `block_type='ocr_page'`, full text in
 `text`, all bbox/confidence/font fields NULL. FTS still works at
 page granularity; bbox queries and figure extraction don't.
 
-`index_metadata.ocr_source` distinguishes the four cases:
-`alto` | `text_plain` | `mixed` | `none`.
+`index_metadata.ocr_source` distinguishes the cases:
+`alto` | `hocr` | `text_plain` | `djvu` | `mixed` | `none`.
+
+### Monolithic (whole-book) OCR as a source
+
+Every source above is *per-canvas*: one OCR file per page, addressed
+from that canvas's `seeAlso`. Internet Archive doesn't work that way —
+it publishes one OCR file for the entire book, `{id}_hocr.html`
+(modern items) or `{id}_djvu.xml` (older scans). Both are listed in
+the manifest's top-level **`rendering`** array, not `seeAlso`; only
+the sidecar metadata (pageindex, page numbers, MARC, scandata) is in
+`seeAlso`. The IA adapter surfaces both arrays' derivatives as
+`ia_*_url` document-metadata keys.
+
+`create-index` falls back to this branch when no canvas yielded
+per-canvas OCR: one fetch, one multipage parse
+(`core.hocr.parse_hocr_multipage` / `core.djvu.parse_djvu_multipage`),
+producing exactly the same `text_blocks` rows as the per-canvas
+branches. `index_metadata.ocr_shape='monolithic'` records it.
+
+Notes, each verified against real items:
+
+- **Leaf mapping.** hOCR page divs carry `id="page_N"`, where N is the
+  leaf number and matches our canvas index directly; DjVu `OBJECT`
+  elements are positional. Cross-checked against ia-utils indexes of
+  the same books (Gray 1918: 37/37 sampled leaves identical; Charcot
+  1877: 28/29, the one difference being block *order* only — same 9
+  blocks, same 354 words, zero gained or lost).
+- **Trailing leaves.** IA's IIIF manifest can expose fewer canvases
+  than the book has leaves (Gray: 1402 canvases vs 1414 OCR pages).
+  Out-of-range leaves are dropped with a warning. Verified trailing,
+  not mid-book gaps — a gap would break alignment silently.
+- **Block order is document order**, not position-sorted (ia-utils
+  sorts). On multi-column pages the two differ. This is deliberate per
+  WORD_GEOMETRY_PLAN §3.5: raw OCR order is what gets stored, and
+  reading order becomes a derived view. FTS is order-independent.
+- **Confidence.** The monolithic hOCR path retains per-block mean
+  `x_wconf` (the ia-utils dialect always did); the per-canvas hOCR
+  path still writes NULL, preserving the §3.5 invariant.
+- **DjVu axis order.** DjVu word coords are `left,bottom,right,top` —
+  converted once in `core.djvu` to the `x0,y0,x1,y1` convention every
+  other parser uses. Downstream code never sees raw DjVu order.
+
+### Provider-authoritative page numbers
+
+`book_page_number` normally comes from the canvas label. For IA that
+would be wrong: IA's labels are sequential counters, so leaf 24 of
+Gray 1918 (printed page 20) is labelled '25'. IA instead publishes
+`{id}_page_numbers.json` from its own detector, with per-leaf
+`confidence` / `pageProb` / `wordConf` — which is exactly why
+`page_numbers` carries those three columns (§3.4).
+
+When a provider supplies such a map it is treated as **exhaustive**: a
+leaf missing from it is deliberately unnumbered (cover, plates,
+endpapers), and we write NULL rather than falling back to the label —
+falling back would invent page numbers for precisely the pages the
+detector declined to number. With this rule, page numbers agree with
+ia-utils on 1402/1402 leaves (Gray) and 563/563 (Charcot).
 
 ### HTTP retry & rate-limit handling
 

@@ -27,6 +27,12 @@ class TextBlock:
     bbox_y0: int
     bbox_x1: int
     bbox_y1: int
+    # Optional extras — populated by the monolithic-hOCR / DjVu parsers
+    # (IA path). ALTO and per-canvas hOCR leave them None: Wellcome ALTO
+    # has no confidence, and the MDZ path preserves its documented
+    # NULL-confidence invariant (see core/hocr.py).
+    avg_confidence: float | None = None
+    block_type: str | None = None
 
 
 @dataclass(frozen=True)

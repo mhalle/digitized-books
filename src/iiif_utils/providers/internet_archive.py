@@ -9,20 +9,15 @@ is well-formed and carries:
     hocr_pageindex.json.gz, MARC, scandata, etc.
   - `metadata` block with title/creator/subject/date/etc.
 
-What it does NOT carry — and why this provider is intentionally thin:
-
-  - **No per-canvas hOCR seeAlso.** IA's hOCR is one monolithic file
-    (`{id}_hocr.html`) addressed by leaf number via the page index, not
-    split into per-page URLs. The iiif-utils indexing pipeline expects
-    per-canvas OCR URLs in `seeAlso`, so `create-index` against an IA
-    manifest will produce a text-less index.
-
-    For full-text indexing of IA items, use the sibling **ia-utils**
-    package, which consumes IA's native fast-path (searchtext +
-    pageindex) and handles the DjVu fallback for older items.
-
-  - This provider supports viewing / cropping / region extraction /
-    mosaics — i.e. the IIIF-side jobs — for IA items.
+What it does NOT carry: per-canvas OCR seeAlso. IA's OCR is one
+monolithic file per book — `{id}_hocr.html` (modern items) or
+`{id}_djvu.xml` (older scans) — not per-page URLs. This adapter
+surfaces those whole-book URLs in extra metadata (`ia_hocr_url`,
+`ia_djvu_xml_url`, ...) and `create-index` consumes them through its
+monolithic branch: one fetch, one multipage parse, the same
+text_blocks/FTS shape as every other provider. So IA items get full
+support — viewing / cropping / region extraction / mosaics AND
+full-text indexing.
 
 Accepted inputs:
 
@@ -103,19 +98,41 @@ def _flatten_v3_value(val: Any) -> str | None:
     return str(val)
 
 
-# seeAlso entries on the IA manifest worth surfacing as document
-# metadata. Maps a substring match against the `id` URL to a stable key.
-_SEEALSO_KEYS = (
+# IA derivative files worth surfacing as document metadata, matched by
+# filename suffix (optionally gzipped) against the URL's basename.
+#
+# These are split across BOTH manifest arrays, and not the way you'd
+# guess: `seeAlso` carries the metadata sidecars (pageindex, page
+# numbers, MARC, scandata) while the OCR payloads we actually index
+# from — `_hocr.html`, `_djvu.xml` — arrive in `rendering`. Scan both.
+_DERIVATIVE_KEYS = (
     ("_page_numbers.json", "ia_page_numbers_url"),
     ("_hocr_pageindex.json", "ia_hocr_pageindex_url"),
-    ("_hocr.html", "ia_hocr_url"),
     ("_hocr_searchtext.txt", "ia_hocr_searchtext_url"),
+    ("_hocr.html", "ia_hocr_url"),
     ("_djvu.xml", "ia_djvu_xml_url"),
+    ("_djvu.txt", "ia_djvu_txt_url"),
     ("_scandata.xml", "ia_scandata_url"),
     ("_meta.xml", "ia_meta_xml_url"),
     ("_marc.xml", "ia_marc_xml_url"),
-    ("/metadata/", "ia_metadata_api_url"),
+    (".pdf", "ia_pdf_url"),
 )
+
+
+def _derivative_key(url: str) -> str | None:
+    """Map a derivative URL to its stable metadata key, if recognized.
+
+    Matches on the basename so `_chocr.html.gz` can never be mistaken
+    for `_hocr.html`, and tolerates a trailing `.gz` (IA gzips some
+    derivatives and not others, inconsistently across items).
+    """
+    base = urlparse(url).path.rstrip("/").rsplit("/", 1)[-1]
+    if base.endswith(".gz"):
+        base = base[:-3]
+    for suffix, key in _DERIVATIVE_KEYS:
+        if base.endswith(suffix):
+            return key
+    return None
 
 
 def extra_metadata_for(manifest: dict[str, Any],
@@ -141,18 +158,59 @@ def extra_metadata_for(manifest: dict[str, Any],
         if lab and val:
             out[f"manifest_metadata:{lab}"] = val
 
-    # Capture useful derivative URLs from top-level seeAlso.
-    for entry in manifest.get("seeAlso", []) or []:
+    # Capture useful derivative URLs from BOTH top-level arrays.
+    for field in ("seeAlso", "rendering"):
+        entries = manifest.get(field) or []
+        if isinstance(entries, dict):        # tolerate single-dict form
+            entries = [entries]
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            sid = entry.get("id") or entry.get("@id") or ""
+            if not isinstance(sid, str) or not sid:
+                continue
+            if "/metadata/" in sid:
+                out.setdefault("ia_metadata_api_url", sid)
+                continue
+            key = _derivative_key(sid)
+            if key:
+                out.setdefault(key, sid)
+
+    return out
+
+
+def parse_page_numbers(content: bytes) -> dict[int, dict[str, Any]]:
+    """Parse IA's `{id}_page_numbers.json` into {leaf_num: fields}.
+
+    IA runs its own printed-page-number detector and publishes the
+    result with per-leaf confidence. This is authoritative and must be
+    preferred over IIIF canvas labels, which for IA are just sequential
+    counters (leaf+1) — using them would mislabel every page in the
+    book (verified on Gray 1918: leaf 24 is printed page 20, but its
+    canvas label reads '25').
+
+    `leafNum` uses the same numbering as the hOCR `page_N` ids and our
+    canvas index. The array is sparse — leaves can be missing — so
+    always map by leafNum, never by list position. Empty `pageNumber`
+    (unnumbered plates, endpapers) becomes None.
+    """
+    import json
+    payload = json.loads(content)
+    pages = payload.get("pages") if isinstance(payload, dict) else payload
+    out: dict[int, dict[str, Any]] = {}
+    for entry in pages or []:
         if not isinstance(entry, dict):
             continue
-        sid = entry.get("id") or entry.get("@id") or ""
-        if not isinstance(sid, str):
+        leaf = entry.get("leafNum")
+        if not isinstance(leaf, int):
             continue
-        for needle, key in _SEEALSO_KEYS:
-            if needle in sid and key not in out:
-                out[key] = sid
-                break
-
+        num = (entry.get("pageNumber") or "").strip() or None
+        out[leaf] = {
+            "book_page_number": num,
+            "confidence": entry.get("confidence"),
+            "pageProb": entry.get("pageProb"),
+            "wordConf": entry.get("wordConf"),
+        }
     return out
 
 

@@ -112,6 +112,7 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
             "identifier:heidelberg_diglit",
             "identifier:bsb",
             "identifier:lccn",
+            "identifier:ia",
         ):
             val = ref_obj.extra_metadata.get(key)
             if val:
@@ -175,6 +176,7 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
     tb_rows: list[dict[str, Any]] = []
     il_rows: list[dict[str, Any]] = []
     image_dims: dict[int, tuple[int, int]] = {}
+    mono_source: str | None = None
     if no_ocr:
         n_alto_canvases = n_hocr_canvases = n_text_canvases = 0
         if canvases:
@@ -193,13 +195,25 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
             tb_rows, il_rows, image_dims = _parse_altos(
                 canvases, cfg_http=cfg_http, cache_dir=cache_dir, log=log,
             )
+        if canvases and not tb_rows:
+            # No per-canvas OCR anywhere. IA ships whole-book OCR
+            # derivatives instead (one monolithic hOCR or DjVu-XML file);
+            # when the provider surfaced those URLs, index from them.
+            mono = _parse_monolithic_ocr(
+                ref_obj.extra_metadata, canvases,
+                cfg_http=cfg_http, cache_dir=cache_dir, log=log,
+            )
+            if mono is not None:
+                tb_rows, image_dims, mono_source = mono
 
     # --- index_metadata (after parse so we know the OCR provenance) --------
     from iiif_utils import __version__
     have = [k for k, v in (("alto", n_alto_canvases),
                              ("hocr", n_hocr_canvases),
                              ("text_plain", n_text_canvases)) if v]
-    if not have:
+    if mono_source:
+        ocr_source = mono_source        # 'hocr' | 'djvu' (whole-book file)
+    elif not have:
         ocr_source = "none"
     elif len(have) == 1:
         ocr_source = have[0]
@@ -216,6 +230,9 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
         "presentation_api_version": manifest_mod.presentation_version(manifest),
         "iiif_utils_version": __version__,
     }
+    if mono_source:
+        # Whole-book OCR file (IA shape) rather than per-canvas seeAlso.
+        idx_md["ocr_shape"] = "monolithic"
     if flags.partial_digitization:
         idx_md["partial_digitization"] = flags.partial_digitization
     if flags.contains_multiple_volumes:
@@ -238,15 +255,29 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
         )
 
     # --- page_numbers ------------------------------------------------------
+    # Providers that publish their own printed-page-number detection
+    # override the canvas label, which is not always a page number.
+    pn_override = _fetch_page_number_overrides(
+        ref_obj.extra_metadata, cfg_http=cfg_http, cache_dir=cache_dir,
+        log=log,
+    )
     pn_rows: list[dict[str, Any]] = []
     for c in canvases:
         img_dim = image_dims.get(c.index)
+        ov = pn_override.get(c.index, {})
+        # When the provider ships a page-number map, it is exhaustive:
+        # a leaf missing from it is deliberately unnumbered (cover,
+        # plates, endpapers). Falling back to the canvas label there
+        # would invent a page number — for IA the label is just a
+        # counter, so leaf 0 would claim to be page '1'.
         pn_rows.append({
             "leaf_num": c.index,
-            "book_page_number": db_mod.book_page_from_label(c.label),
-            "confidence": None,
-            "pageProb": None,
-            "wordConf": None,
+            "book_page_number": (
+                ov.get("book_page_number") if pn_override
+                else db_mod.book_page_from_label(c.label)),
+            "confidence": ov.get("confidence"),
+            "pageProb": ov.get("pageProb"),
+            "wordConf": ov.get("wordConf"),
             "canvas_id": c.canvas_id,
             "canvas_label": c.label,
             "image_id": c.image_id,
@@ -348,36 +379,12 @@ def _parse_altos(canvases: list[Any], *, cfg_http: dict[str, Any],
         return tb_rows, il_rows, image_dims
 
     def _ingest_xml_blocks(c: Any, page: Any, kind: str) -> None:
-        if page.page_w and page.page_h:
-            image_dims[c.index] = (page.page_w, page.page_h)
-        for b in page.text_blocks:
-            tb_rows.append({
-                "page_id": c.index,
-                "block_number": b.block_number,
-                "block_type": ("ocr_textblock" if kind == "alto"
-                                else "ocrx_block"),
-                "language": None,
-                "text_direction": None,
-                "bbox_x0": b.bbox_x0, "bbox_y0": b.bbox_y0,
-                "bbox_x1": b.bbox_x1, "bbox_y1": b.bbox_y1,
-                "text": b.text,
-                "line_count": b.line_count,
-                "word_count": b.word_count,
-                "length": b.length,
-                "avg_confidence": None,
-                "avg_font_size": None,
-                "parent_carea_id": None,
-                "alto_id": b.alto_id,
-            })
-        for ill in page.illustrations:
-            il_rows.append({
-                "page_id": c.index,
-                "illustration_number": ill.illustration_number,
-                "bbox_x0": ill.bbox_x0, "bbox_y0": ill.bbox_y0,
-                "bbox_x1": ill.bbox_x1, "bbox_y1": ill.bbox_y1,
-                "illustration_type": ill.illustration_type,
-                "alto_id": ill.alto_id,
-            })
+        _rows_from_page(
+            c.index, page,
+            default_block_type=("ocr_textblock" if kind == "alto"
+                                 else "ocrx_block"),
+            tb_rows=tb_rows, il_rows=il_rows, image_dims=image_dims,
+        )
 
     # --- ALTO branch -------------------------------------------------------
     if alto_canvases:
@@ -462,3 +469,150 @@ def _parse_altos(canvases: list[Any], *, cfg_http: dict[str, Any],
         log.info(f"ingested {n_text} plain-text fallbacks")
 
     return tb_rows, il_rows, image_dims
+
+
+def _rows_from_page(page_index: int, page: Any, *, default_block_type: str,
+                     tb_rows: list[dict[str, Any]],
+                     il_rows: list[dict[str, Any]],
+                     image_dims: dict[int, tuple[int, int]]) -> None:
+    """Convert one parsed AltoPage into text_blocks / illustrations rows.
+
+    Shared by the per-canvas branches (_parse_altos) and the monolithic
+    branch (_parse_monolithic_ocr). Block type and confidence come from
+    the TextBlock when the parser set them (monolithic hOCR / DjVu);
+    otherwise the per-source default applies and confidence stays NULL.
+    """
+    if page.page_w and page.page_h:
+        image_dims[page_index] = (page.page_w, page.page_h)
+    for b in page.text_blocks:
+        tb_rows.append({
+            "page_id": page_index,
+            "block_number": b.block_number,
+            "block_type": b.block_type or default_block_type,
+            "language": None,
+            "text_direction": None,
+            "bbox_x0": b.bbox_x0, "bbox_y0": b.bbox_y0,
+            "bbox_x1": b.bbox_x1, "bbox_y1": b.bbox_y1,
+            "text": b.text,
+            "line_count": b.line_count,
+            "word_count": b.word_count,
+            "length": b.length,
+            "avg_confidence": b.avg_confidence,
+            "avg_font_size": None,
+            "parent_carea_id": None,
+            "alto_id": b.alto_id,
+        })
+    for ill in page.illustrations:
+        il_rows.append({
+            "page_id": page_index,
+            "illustration_number": ill.illustration_number,
+            "bbox_x0": ill.bbox_x0, "bbox_y0": ill.bbox_y0,
+            "bbox_x1": ill.bbox_x1, "bbox_y1": ill.bbox_y1,
+            "illustration_type": ill.illustration_type,
+            "alto_id": ill.alto_id,
+        })
+
+
+def _fetch_page_number_overrides(
+    extra_metadata: dict[str, str], *, cfg_http: dict[str, Any],
+    cache_dir: Path, log: Logger,
+) -> dict[int, dict[str, Any]]:
+    """Authoritative printed page numbers, when the provider ships them.
+
+    IA publishes `{id}_page_numbers.json` from its own detector, with
+    per-leaf confidence. IA's IIIF canvas labels are only sequential
+    counters, so without this every IA index would carry page numbers
+    off by the front-matter offset. Best-effort: a failure here falls
+    back to canvas labels rather than aborting the index.
+    """
+    url = extra_metadata.get("ia_page_numbers_url")
+    if not url:
+        return {}
+    from iiif_utils.providers import internet_archive as ia_mod
+    try:
+        content = http_.fetch_bytes(url, cfg_http=cfg_http,
+                                      cache_dir=cache_dir / "monolithic",
+                                      suffix=".page_numbers.json")
+        out = ia_mod.parse_page_numbers(content)
+    except Exception as e:
+        log.warn(f"page_numbers.json failed ({e}); "
+                 f"falling back to canvas labels")
+        return {}
+    n_numbered = sum(1 for v in out.values() if v["book_page_number"])
+    log.info(f"page numbers from IA detector: {n_numbered} numbered "
+             f"of {len(out)} leaves")
+    return out
+
+
+def _parse_monolithic_ocr(
+    extra_metadata: dict[str, str], canvases: list[Any], *,
+    cfg_http: dict[str, Any], cache_dir: Path, log: Logger,
+) -> tuple[list[dict[str, Any]], dict[int, tuple[int, int]], str] | None:
+    """Whole-book OCR fallback for providers with no per-canvas OCR.
+
+    IA publishes OCR as monolithic derivatives — one `{id}_hocr.html`
+    (modern items) or `{id}_djvu.xml` (older scans) for the whole book —
+    surfaced by the IA adapter as `ia_hocr_url` / `ia_djvu_xml_url` in
+    extra metadata. One fetch, one multipage parse, same row shapes as
+    the per-canvas branches.
+
+    Returns (tb_rows, image_dims, ocr_source) or None when the provider
+    surfaced no monolithic URLs. hOCR is preferred (richer: bboxes at
+    paragraph level + confidence + Tesseract block classes); DjVu is
+    the fallback, tried also when the hOCR fetch/parse fails.
+    """
+    hocr_url = extra_metadata.get("ia_hocr_url")
+    djvu_url = extra_metadata.get("ia_djvu_xml_url")
+    if not hocr_url and not djvu_url:
+        return None
+
+    mono_dir = cache_dir / "monolithic"
+    pages: list[tuple[int, Any]] | None = None
+    source = ""
+    if hocr_url:
+        from iiif_utils.core import hocr as hocr_mod
+        log.info(f"fetching monolithic hOCR: {hocr_url}")
+        try:
+            content = http_.fetch_bytes(hocr_url, cfg_http=cfg_http,
+                                          cache_dir=mono_dir,
+                                          suffix=".hocr.html")
+            pages = hocr_mod.parse_hocr_multipage(content)
+            source = "hocr"
+        except Exception as e:
+            log.warn(f"monolithic hOCR failed ({e}); "
+                     + ("trying DjVu XML" if djvu_url else "no DjVu fallback"))
+            pages = None
+    if pages is None and djvu_url:
+        from iiif_utils.core import djvu as djvu_mod
+        log.info(f"fetching DjVu XML: {djvu_url}")
+        try:
+            content = http_.fetch_bytes(djvu_url, cfg_http=cfg_http,
+                                          cache_dir=mono_dir,
+                                          suffix=".djvu.xml")
+            pages = djvu_mod.parse_djvu_multipage(content)
+            source = "djvu"
+        except Exception as e:
+            log.warn(f"DjVu XML failed ({e})")
+            pages = None
+    if pages is None:
+        return None
+
+    valid = {c.index for c in canvases}
+    tb_rows: list[dict[str, Any]] = []
+    il_rows: list[dict[str, Any]] = []  # always empty for hOCR/DjVu
+    image_dims: dict[int, tuple[int, int]] = {}
+    dropped = 0
+    for leaf, page in pages:
+        if leaf not in valid:
+            dropped += 1
+            continue
+        _rows_from_page(leaf, page, default_block_type="ocr_par",
+                         tb_rows=tb_rows, il_rows=il_rows,
+                         image_dims=image_dims)
+    if len(pages) != len(canvases):
+        log.warn(f"monolithic {source}: {len(pages)} OCR pages vs "
+                 f"{len(canvases)} canvases"
+                 + (f"; {dropped} pages outside canvas range dropped"
+                    if dropped else ""))
+    log.info(f"parsed {len(pages) - dropped} pages from monolithic {source}")
+    return tb_rows, image_dims, source

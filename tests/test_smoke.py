@@ -801,6 +801,103 @@ def test_ia_extra_metadata():
     assert "/metadata/" in out["ia_metadata_api_url"]
 
 
+def test_ia_derivatives_come_from_rendering_not_seealso():
+    """The OCR payloads we index from live in `rendering`, not `seeAlso`
+    — verified against the real Gray's Anatomy manifest."""
+    from iiif_utils.providers.internet_archive import extra_metadata_for
+    base = "https://archive.org/download/gray/gray"
+    manifest = {
+        "seeAlso": [
+            {"id": f"{base}_hocr_pageindex.json.gz"},
+            {"id": f"{base}_scandata.xml"},
+        ],
+        "rendering": [
+            {"id": f"{base}.pdf"},
+            {"id": f"{base}_chocr.html.gz"},     # must NOT match _hocr.html
+            {"id": f"{base}_hocr_searchtext.txt.gz"},
+            {"id": f"{base}_hocr.html"},
+            {"id": f"{base}_djvu.xml"},
+            {"id": f"{base}_djvu.txt"},
+        ],
+    }
+    out = extra_metadata_for(manifest, "gray")
+    assert out["ia_hocr_url"] == f"{base}_hocr.html"
+    assert out["ia_djvu_xml_url"] == f"{base}_djvu.xml"
+    assert out["ia_djvu_txt_url"] == f"{base}_djvu.txt"
+    assert out["ia_pdf_url"] == f"{base}.pdf"
+    assert out["ia_hocr_searchtext_url"] == f"{base}_hocr_searchtext.txt.gz"
+    assert out["ia_hocr_pageindex_url"] == f"{base}_hocr_pageindex.json.gz"
+    assert out["ia_scandata_url"] == f"{base}_scandata.xml"
+
+
+def test_ia_parse_page_numbers():
+    """IA's own detector is authoritative; canvas labels are counters."""
+    from iiif_utils.providers.internet_archive import parse_page_numbers
+    payload = b"""{
+      "identifier": "x", "format-version": "2",
+      "pages": [
+        {"leafNum": 1, "confidence": null, "pageNumber": "",
+         "pageProb": null, "wordConf": null},
+        {"leafNum": 24, "confidence": 100, "pageNumber": "20",
+         "pageProb": 94, "wordConf": 99},
+        {"leafNum": 687, "confidence": 100, "pageNumber": "687",
+         "pageProb": 97, "wordConf": 32}
+      ]
+    }"""
+    out = parse_page_numbers(payload)
+    # Sparse: keyed by leafNum, not list position
+    assert set(out) == {1, 24, 687}
+    assert out[24]["book_page_number"] == "20"
+    assert out[24]["confidence"] == 100
+    assert out[24]["pageProb"] == 94
+    assert out[24]["wordConf"] == 99
+    # Empty pageNumber (endpapers/plates) → None, not ""
+    assert out[1]["book_page_number"] is None
+
+
+def test_ia_page_numbers_override_used_by_create_index(monkeypatch, tmp_path):
+    from iiif_utils.commands import create_index as ci
+    from iiif_utils.utils.logger import Logger
+    payload = (b'{"pages": [{"leafNum": 24, "confidence": 100,'
+               b' "pageNumber": "20", "pageProb": 94, "wordConf": 99}]}')
+    monkeypatch.setattr(ci.http_, "fetch_bytes", lambda url, **kw: payload)
+    out = ci._fetch_page_number_overrides(
+        {"ia_page_numbers_url": "https://x/y_page_numbers.json"},
+        cfg_http={}, cache_dir=tmp_path, log=Logger(verbose=False),
+    )
+    assert out[24]["book_page_number"] == "20"
+
+
+def test_page_number_overrides_absent_without_url(tmp_path):
+    from iiif_utils.commands import create_index as ci
+    from iiif_utils.utils.logger import Logger
+    assert ci._fetch_page_number_overrides(
+        {}, cfg_http={}, cache_dir=tmp_path, log=Logger(verbose=False),
+    ) == {}
+
+
+def test_page_number_overrides_fall_back_on_error(monkeypatch, tmp_path):
+    """A broken page_numbers.json must not abort the whole index."""
+    from iiif_utils.commands import create_index as ci
+    from iiif_utils.utils.logger import Logger
+
+    def boom(url, **kw):
+        raise RuntimeError("404")
+    monkeypatch.setattr(ci.http_, "fetch_bytes", boom)
+    assert ci._fetch_page_number_overrides(
+        {"ia_page_numbers_url": "https://x/y.json"},
+        cfg_http={}, cache_dir=tmp_path, log=Logger(verbose=False),
+    ) == {}
+
+
+def test_ia_derivative_key_rejects_chocr():
+    """`_chocr.html.gz` is a different format — never map it to hOCR."""
+    from iiif_utils.providers.internet_archive import _derivative_key
+    assert _derivative_key("https://x/y/z_chocr.html.gz") is None
+    assert _derivative_key("https://x/y/z_hocr.html") == "ia_hocr_url"
+    assert _derivative_key("https://x/y/z_hocr.html.gz") == "ia_hocr_url"
+
+
 def test_ia_provider_guessed_from_url():
     from iiif_utils.providers import _guess_provider
     cfg = {"default_provider": "generic"}
@@ -814,6 +911,187 @@ def test_ia_provider_guessed_from_url():
     assert _guess_provider(
         "https://archive.org/download/foo/bar.pdf", cfg,
     ) == "ia"
+
+
+MONO_HOCR = b"""<html><body>
+<div class="ocr_page" id="page_0" title="image f0; bbox 0 0 1000 1500; ppageno 0">
+  <div class="ocr_carea" title="bbox 10 20 110 60">
+    <p class="ocr_par" title="bbox 10 20 110 60">
+      <span class="ocr_line" title="bbox 10 20 110 60">
+        <span class="ocrx_word" title="bbox 10 20 50 60; x_wconf 95">hello</span>
+        <span class="ocrx_word" title="bbox 55 20 110 60; x_wconf 87">world</span>
+      </span>
+    </p>
+  </div>
+</div>
+<div class="ocr_page" id="page_1" title="image f1; bbox 0 0 1000 1500; ppageno 1">
+  <div class="ocr_carea" title="bbox 10 20 200 60">
+    <p class="ocr_caption" title="bbox 10 20 200 60">
+      <span class="ocr_line" title="bbox 10 20 200 60">
+        <span class="ocrx_word" title="bbox 10 20 200 60; x_wconf 80">Fig.</span>
+      </span>
+    </p>
+  </div>
+</div>
+<div class="ocr_page" id="page_2" title="image f2; bbox 0 0 1000 1500; ppageno 2">
+</div>
+</body></html>"""
+
+
+def test_hocr_multipage_parse():
+    from iiif_utils.core.hocr import parse_hocr_multipage
+    pages = parse_hocr_multipage(MONO_HOCR)
+    # Empty page 2 still returned (dims useful downstream)
+    assert [leaf for leaf, _ in pages] == [0, 1, 2]
+    p0 = pages[0][1]
+    assert p0.page_w == 1000 and p0.page_h == 1500
+    assert len(p0.text_blocks) == 1
+    b = p0.text_blocks[0]
+    assert b.text == "hello world"
+    assert b.block_type == "ocr_par"
+    assert b.avg_confidence == 91.0        # mean(95, 87) — IA path keeps it
+    assert (b.bbox_x0, b.bbox_y0, b.bbox_x1, b.bbox_y1) == (10, 20, 110, 60)
+    p1 = pages[1][1]
+    assert p1.text_blocks[0].block_type == "ocr_caption"
+    assert pages[2][1].text_blocks == []
+
+
+def test_hocr_multipage_sequence_fallback_without_ids():
+    from iiif_utils.core.hocr import parse_hocr_multipage
+    sample = b"""<html><body>
+    <div class="ocr_page" title="bbox 0 0 100 100"></div>
+    <div class="ocr_page" title="bbox 0 0 100 100"></div>
+    </body></html>"""
+    pages = parse_hocr_multipage(sample)
+    assert [leaf for leaf, _ in pages] == [0, 1]
+
+
+def test_hocr_single_page_confidence_stays_null():
+    """MDZ per-canvas path must preserve its NULL-confidence invariant."""
+    from iiif_utils.core.hocr import parse_hocr_bytes
+    sample = b"""<html><body>
+    <div class="ocr_page" title="bbox 0 0 1000 1500">
+      <div class="ocrx_block" title="bbox 10 20 110 60">
+        <span class="ocr_line" title="bbox 10 20 110 60">
+          <span class="ocrx_word" title="bbox 10 20 50 60; x_wconf 95">hi</span>
+        </span>
+      </div>
+    </div></body></html>"""
+    page = parse_hocr_bytes(sample)
+    assert page.text_blocks[0].avg_confidence is None
+
+
+MONO_DJVU = b"""<?xml version="1.0"?>
+<DjVuXML>
+<BODY>
+<OBJECT width="2400" height="3600">
+  <HIDDENTEXT><PAGECOLUMN><REGION>
+    <PARAGRAPH>
+      <LINE>
+        <WORD coords="278,1029,437,993" x-confidence="90">Smakula,</WORD>
+        <WORD coords="450,1029,600,993" x-confidence="80">Alexander</WORD>
+      </LINE>
+    </PARAGRAPH>
+  </REGION></PAGECOLUMN></HIDDENTEXT>
+</OBJECT>
+<OBJECT width="2400" height="3600">
+</OBJECT>
+</BODY>
+</DjVuXML>"""
+
+
+def test_djvu_multipage_parse_and_axis_conversion():
+    from iiif_utils.core.djvu import parse_djvu_multipage
+    pages = parse_djvu_multipage(MONO_DJVU)
+    assert [leaf for leaf, _ in pages] == [0, 1]
+    p0 = pages[0][1]
+    assert p0.page_w == 2400 and p0.page_h == 3600
+    assert len(p0.text_blocks) == 1
+    b = p0.text_blocks[0]
+    assert b.text == "Smakula, Alexander"
+    assert b.block_type == "ocr_par"
+    assert b.avg_confidence == 85.0
+    # DjVu coords are left,BOTTOM,right,TOP — converted to x0,y0,x1,y1:
+    # union of (278,993,437,1029) and (450,993,600,1029)
+    assert (b.bbox_x0, b.bbox_y0, b.bbox_x1, b.bbox_y1) == (278, 993, 600, 1029)
+    assert b.line_count == 1 and b.word_count == 2
+    # Wordless page still present, no blocks
+    assert pages[1][1].text_blocks == []
+
+
+def _fake_canvas(index):
+    from iiif_utils.core.manifest import Canvas
+    return Canvas(index=index, canvas_id=f"c{index}", label=None,
+                   image_id=None, image_service_url=None,
+                   image_api_version=None, width=None, height=None,
+                   alto_url=None, text_url=None, hocr_url=None)
+
+
+def test_monolithic_ocr_branch_hocr(monkeypatch, tmp_path):
+    """IA shape: whole-book hOCR URL in extra metadata → text_blocks rows."""
+    from iiif_utils.commands import create_index as ci
+    from iiif_utils.utils.logger import Logger
+    monkeypatch.setattr(ci.http_, "fetch_bytes",
+                        lambda url, **kw: MONO_HOCR)
+    canvases = [_fake_canvas(i) for i in range(3)]
+    out = ci._parse_monolithic_ocr(
+        {"ia_hocr_url": "https://archive.org/download/x/x_hocr.html"},
+        canvases, cfg_http={}, cache_dir=tmp_path, log=Logger(verbose=False),
+    )
+    assert out is not None
+    tb_rows, image_dims, source = out
+    assert source == "hocr"
+    assert image_dims[0] == (1000, 1500)
+    assert [r["page_id"] for r in tb_rows] == [0, 1]
+    assert tb_rows[0]["text"] == "hello world"
+    assert tb_rows[0]["block_type"] == "ocr_par"
+    assert tb_rows[0]["avg_confidence"] == 91.0
+    assert tb_rows[1]["block_type"] == "ocr_caption"
+
+
+def test_monolithic_ocr_branch_djvu_fallback(monkeypatch, tmp_path):
+    """hOCR absent → DjVu XML fallback drives the same row shape."""
+    from iiif_utils.commands import create_index as ci
+    from iiif_utils.utils.logger import Logger
+    monkeypatch.setattr(ci.http_, "fetch_bytes",
+                        lambda url, **kw: MONO_DJVU)
+    canvases = [_fake_canvas(i) for i in range(2)]
+    out = ci._parse_monolithic_ocr(
+        {"ia_djvu_xml_url": "https://archive.org/download/x/x_djvu.xml"},
+        canvases, cfg_http={}, cache_dir=tmp_path, log=Logger(verbose=False),
+    )
+    assert out is not None
+    tb_rows, image_dims, source = out
+    assert source == "djvu"
+    assert len(tb_rows) == 1
+    assert tb_rows[0]["text"] == "Smakula, Alexander"
+    assert tb_rows[0]["bbox_y0"] == 993   # axis conversion survived ingest
+
+
+def test_monolithic_ocr_branch_none_without_urls(tmp_path):
+    from iiif_utils.commands import create_index as ci
+    from iiif_utils.utils.logger import Logger
+    out = ci._parse_monolithic_ocr(
+        {}, [_fake_canvas(0)], cfg_http={}, cache_dir=tmp_path,
+        log=Logger(verbose=False),
+    )
+    assert out is None
+
+
+def test_monolithic_ocr_drops_out_of_range_leaves(monkeypatch, tmp_path):
+    """OCR pages beyond the canvas range are dropped with a warning."""
+    from iiif_utils.commands import create_index as ci
+    from iiif_utils.utils.logger import Logger
+    monkeypatch.setattr(ci.http_, "fetch_bytes",
+                        lambda url, **kw: MONO_HOCR)
+    canvases = [_fake_canvas(0)]  # only leaf 0 exists
+    out = ci._parse_monolithic_ocr(
+        {"ia_hocr_url": "https://x/h.html"},
+        canvases, cfg_http={}, cache_dir=tmp_path, log=Logger(verbose=False),
+    )
+    assert out is not None
+    tb_rows, _dims, _source = out
+    assert [r["page_id"] for r in tb_rows] == [0]
 
 
 def test_alto_minimal_parse():
