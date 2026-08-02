@@ -23,6 +23,7 @@ from iiif_utils.commands.outline_list import outline_list
 from iiif_utils.commands.outline_status import outline_status
 from iiif_utils.commands.rebuild_index import rebuild_index
 from iiif_utils.commands.search_catalog import search_catalog
+from iiif_utils.commands.migrate_index import migrate_index
 from iiif_utils.commands.render_page import render_page
 from iiif_utils.commands.search_index import search_index
 
@@ -50,6 +51,7 @@ cli.add_command(list_files)
 cli.add_command(ocr_page)
 cli.add_command(create_index)
 cli.add_command(rebuild_index)
+cli.add_command(migrate_index)
 cli.add_command(search_catalog)
 cli.add_command(search_catalog, name="search-cat")  # alias
 cli.add_command(search_index)

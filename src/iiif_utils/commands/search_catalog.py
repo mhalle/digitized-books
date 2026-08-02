@@ -1,8 +1,8 @@
 """`iiif-utils search-catalog` (alias `search-cat`) — discovery via a
 provider's catalog API.
 
-Currently only Wellcome is wired. The generic provider has no
-catalog endpoint and raises a clear error.
+Wellcome, LoC and Internet Archive are wired. The generic provider has
+no catalog endpoint and raises a clear error.
 """
 from __future__ import annotations
 
@@ -67,9 +67,12 @@ def _parse_year(spec: str) -> tuple[str | None, str | None]:
               help="Sort by production.dates instead of relevance.")
 @click.option("--sort-desc", is_flag=True, default=False,
               help="Descending sort (default: ascending).")
+@click.option("--collection", "collections", multiple=True,
+              help="Collection identifier (repeatable). Internet Archive "
+                   "only; ignored by other providers.")
 @click.option("-P", "--provider", default="wellcome",
-              type=click.Choice(["wellcome", "loc"]),
-              help="Provider key. wellcome | loc.")
+              type=click.Choice(["wellcome", "loc", "ia"]),
+              help="Provider key. wellcome | loc | ia.")
 @output_.format_option(default="table")
 @click.option("--config", "config_path", type=click.Path(path_type=Path),
               default=None)
@@ -78,11 +81,21 @@ def search_catalog(query: str | None, year: str | None, creator: str | None,
                  work_type: str | None, license_id: str | None,
                  has_iiif: bool, access_status: str | None,
                  limit: int, page: int, sort_by_date: bool, sort_desc: bool,
-                 provider: str, fmt: str,
+                 collections: tuple[str, ...], provider: str, fmt: str,
                  config_path: Path | None) -> None:
     """Search a provider's catalog for works."""
     cfg = load_config(config_path)
     cfg_http = cfg.get("http", {})
+
+    if provider == "ia":
+        _search_ia(
+            query=query, year=year, creator=creator, subject=subject,
+            languages=languages, collections=collections,
+            work_type=work_type, has_iiif=has_iiif, limit=limit, page=page,
+            sort_by_date=sort_by_date, sort_desc=sort_desc,
+            fmt=fmt, cfg_http=cfg_http,
+        )
+        return
 
     if provider == "loc":
         _search_loc(
@@ -218,6 +231,134 @@ def _search_loc(*, query: str | None, year: str | None,
         total_pages = pagination.get("total") or pagination.get("totalPages")
         if cur and total_pages:
             click.echo(f"\n  page {cur}/{total_pages}", err=True)
+
+
+def _ia_quote(value: str) -> str:
+    return '"' + value.replace('"', '\\"') + '"'
+
+
+def _ia_year_clause(spec: str) -> str | None:
+    """Year spec → IA's Lucene date-range syntax."""
+    y_from, y_to = _parse_year(spec)
+    if not y_from and not y_to:
+        return None
+    return f"date:[{y_from or '*'} TO {y_to or '*'}]"
+
+
+def build_ia_query(*, query: str | None, year: str | None,
+                    creator: str | None, subject: str | None,
+                    languages: tuple[str, ...], collections: tuple[str, ...],
+                    mediatype: str | None, has_ocr: bool,
+                    available_only: bool = True) -> str:
+    """Compose an IA advancedsearch (Lucene) query.
+
+    Ported from ia-utils' query builder, including its default of
+    excluding print-disabled and removed items — without it a large
+    share of hits are things you cannot actually fetch.
+    """
+    parts: list[str] = []
+    if query and query.strip():
+        parts.append(f"({query.strip()})")
+    if not parts:
+        parts.append("*:*")
+    if available_only:
+        parts.append("NOT collection:printdisabled")
+        parts.append("NOT indexflag:removed")
+    if mediatype:
+        parts.append(f"mediatype:{_ia_quote(mediatype)}")
+    for coll in collections:
+        if coll:
+            parts.append(f"collection:{_ia_quote(coll)}")
+    for lang in languages:
+        if lang:
+            parts.append(f"language:{_ia_quote(lang)}")
+    if creator:
+        parts.append(f"creator:{_ia_quote(creator)}")
+    if subject:
+        parts.append(f"subject:{_ia_quote(subject)}")
+    if year:
+        clause = _ia_year_clause(year)
+        if clause:
+            parts.append(clause)
+    if has_ocr:
+        parts.append("ocr:*")
+    return " AND ".join(parts)
+
+
+_IA_FIELDS = ("identifier", "title", "creator", "date", "year", "language",
+               "mediatype", "collection", "downloads", "ocr")
+
+
+def _search_ia(*, query: str | None, year: str | None, creator: str | None,
+                subject: str | None, languages: tuple[str, ...],
+                collections: tuple[str, ...], work_type: str | None,
+                has_iiif: bool, limit: int, page: int, sort_by_date: bool,
+                sort_desc: bool, fmt: str, cfg_http: dict[str, Any]) -> None:
+    """Internet Archive search via `archive.org/advancedsearch.php`.
+
+    Filters with no IA equivalent (license_id, access_status) are
+    ignored, as in the LoC branch. `has_iiif` maps to `ocr:*`: IA
+    serves a IIIF manifest for every item, so "has IIIF" is not
+    discriminating, whereas having OCR is what actually determines
+    whether create-index can build a text index.
+
+    `work_type` maps to IA's `mediatype`, defaulting to `texts`.
+    """
+    from urllib.parse import urlencode
+
+    q = build_ia_query(
+        query=query, year=year, creator=creator, subject=subject,
+        languages=languages, collections=collections,
+        mediatype=work_type or "texts", has_ocr=has_iiif,
+    )
+    params: list[tuple[str, str]] = [("q", q), ("output", "json"),
+                                      ("rows", str(max(1, min(100, limit)))),
+                                      ("page", str(max(1, page)))]
+    for f in _IA_FIELDS:
+        params.append(("fl[]", f))
+    if sort_by_date:
+        params.append(("sort[]", f"date {'desc' if sort_desc else 'asc'}"))
+
+    url = f"https://archive.org/advancedsearch.php?{urlencode(params)}"
+    payload = http_.fetch_json(url, cfg_http=cfg_http)
+    resp = payload.get("response") or {}
+    docs = resp.get("docs") or []
+
+    rows = [_summarize_ia(d) for d in docs]
+    output_.write_records(rows, fmt=fmt)
+
+    if fmt in ("table", "records"):
+        total = resp.get("numFound")
+        if total is not None:
+            click.echo(f"\n  {len(rows)} of {total} results "
+                       f"(page {max(1, page)})", err=True)
+
+
+def _summarize_ia(item: dict[str, Any]) -> dict[str, Any]:
+    """Normalize one IA search hit.
+
+    `ref` is what you hand to create-index / get-page — a details URL,
+    since bare identifiers are never provider-guessed.
+    """
+    def _joined(key: str) -> str | None:
+        v = item.get(key)
+        if isinstance(v, list):
+            return " | ".join(str(x) for x in v if x)
+        return str(v) if v else None
+
+    ident = item.get("identifier") or ""
+    title = str(item.get("title") or "")
+    date = str(item.get("date") or item.get("year") or "")
+    return {
+        "id": ident,
+        "year": date[:4] if date else None,
+        "title": title[:60] + ("…" if len(title) > 60 else ""),
+        "creator": _joined("creator"),
+        "languages": _joined("language"),
+        "has_ocr": bool(item.get("ocr")),
+        "downloads": item.get("downloads"),
+        "ref": f"https://archive.org/details/{ident}" if ident else None,
+    }
 
 
 def _summarize_loc(item: dict[str, Any]) -> dict[str, Any]:

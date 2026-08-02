@@ -528,6 +528,7 @@ breaking schema-aware consumers.
 | `wellcome` | ✓ ships | resolves b-number → `iiif.wellcomecollection.org/presentation/{b}` (v3) | per-canvas ALTO via `seeAlso` (verified ABBYY pipeline) | `search-catalog -P wellcome` (Wellcome Catalogue v2 API) |
 | `loc` | ✓ ships | **synthesized** in memory from `loc.gov/item/{lccn}/?fo=json` (LoC has no Presentation manifest at a clean URL) | per-canvas ALTO when present (modern Tesseract 5.5 backfill); per-canvas plain text otherwise — Vesalius *Fabrica* (LCCN 49043519, 733 canvases) indexes via this branch | `search-catalog -P loc` (loc.gov search?fo=json) |
 | `mdz` (Munich Digitisation Centre) | ✓ ships | direct manifest URL or BSB id; adapter **injects** per-canvas hOCR seeAlso pointing at `/ocr/{bsb_id}/{N}` (URL is **not** in the manifest itself) | per-canvas **hOCR** parsed by `core/hocr.py` (lxml, ocrx_block granularity) | not wired |
+| `ia` (Internet Archive) | ✓ ships | `iiif.archive.org/iiif/{identifier}/manifest.json` (v3) | **whole-book** `_hocr.html`, or `_djvu.xml` for pre-hOCR scans — both listed in the manifest's `rendering` array, parsed once via the monolithic branch. Also consumes IA's `_page_numbers.json` for authoritative printed page numbers | `search-catalog -P ia` (advancedsearch.php, Lucene) |
 | `bodleian` | image-only via `generic` | direct manifest URL | no per-canvas OCR on the manuscripts we sampled | not wired |
 | **`gallica` (BnF)** | **deferred** — image-only works via `generic` (just pass the manifest URL), but full FTS blocked | manifest + IIIF Image API reachable; OCR (`.texteBrut`, `.alto`) **gated behind a security challenge** ("Vérification de sécurité") from non-FR networks; SRU search reachable | not wired |
 | **BIU Santé Paris / Numerabilis** | deferred — non-IIIF | PDFs only at `numerabilis.u-paris.fr/.../pdf/livre{N}.pdf` (the Vesalius 1543 critical edition with Latin transcription + French translation) | would need a `pdf` provider kind (see §10) | not wired |
@@ -691,6 +692,30 @@ uses. `djvu_alignment_warning` fires whenever the DjVu leaves are
 non-contiguous or the count disagrees with the canvases, rather than
 letting text attach silently to the wrong images. This is a further
 reason DjVu stays a fallback for items with no hOCR at all.
+
+### Migrating ia-utils indexes
+
+`migrate-index` converts an existing ia-utils SQLite into this dialect,
+always writing a NEW file and never touching the source. It is a schema
+translation, not a re-index: `document_metadata` is unpivoted from
+ia-utils' wide row into our key/value shape, `text_blocks.hocr_id`
+becomes `alto_id`, `word_count` is derived from the stored text, and
+`index_metadata` is stamped so a shelf scanner can identify the file.
+
+Two things it cannot reconstruct, both recorded in
+`index_metadata.migration_limits` rather than left to be discovered:
+
+- **Canvas / image columns are NULL** — ia-utils addressed images
+  through IA's download endpoints rather than IIIF image services, so
+  `get-page` and friends don't work on a migrated index.
+- **No `page_words`** — word geometry requires re-parsing the OCR
+  source, so layout modes are unavailable.
+
+For either, rebuild from the identifier instead (the migrated
+`identifier:ia` tells you what to pass). Migration is the cheap path
+for books you only need to search; verified against a real ia-utils
+index with 16/16 sampled leaves textually identical to a freshly-built
+one.
 
 ### HTTP retry & rate-limit handling
 

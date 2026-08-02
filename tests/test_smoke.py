@@ -22,7 +22,8 @@ def test_cli_help_lists_commands():
                  "search-catalog", "search-cat", "search-index",
                  "get-info", "get-page", "get-pages", "get-pdf",
                  "get-figure", "get-region", "get-text", "get-url",
-                 "list-figures", "ocr-page", "render-page"):
+                 "list-figures", "ocr-page", "render-page",
+                 "migrate-index"):
         assert cmd in r.output
 
 
@@ -1393,6 +1394,160 @@ def test_create_index_exposes_layout_flag():
     assert "--layout" in r.output
     for mode in ("raw", "columns", "table"):
         assert mode in r.output
+
+
+# --- Phase 3: IA catalog search + migration ------------------------------
+
+def test_build_ia_query_filters_and_quoting():
+    from iiif_utils.commands.search_catalog import build_ia_query
+    q = build_ia_query(
+        query="anatomy", year="1900-1950", creator='Gray, "Henry"',
+        subject="Human anatomy", languages=("eng",),
+        collections=("medicalheritagelibrary",), mediatype="texts",
+        has_ocr=True,
+    )
+    assert "(anatomy)" in q
+    assert 'creator:"Gray, \\"Henry\\""' in q          # quotes escaped
+    assert 'subject:"Human anatomy"' in q
+    assert 'language:"eng"' in q
+    assert 'collection:"medicalheritagelibrary"' in q
+    assert 'mediatype:"texts"' in q
+    assert "date:[1900-01-01 TO 1950-12-31]" in q
+    assert "ocr:*" in q
+    # ia-utils' availability default: unreachable items excluded
+    assert "NOT collection:printdisabled" in q
+    assert "NOT indexflag:removed" in q
+
+
+def test_build_ia_query_open_ended_years_and_empty():
+    from iiif_utils.commands.search_catalog import build_ia_query
+    kw = dict(query=None, creator=None, subject=None, languages=(),
+              collections=(), mediatype=None, has_ocr=False)
+    assert "date:[1900-01-01 TO *]" in build_ia_query(year="1900-", **kw)
+    assert "date:[* TO 1950-12-31]" in build_ia_query(year="-1950", **kw)
+    # No query at all still produces a valid match-all
+    assert build_ia_query(year=None, **kw).startswith("*:*")
+
+
+def test_summarize_ia_builds_usable_ref():
+    """`ref` must be a details URL — bare IA ids are never auto-guessed."""
+    from iiif_utils.commands.search_catalog import _summarize_ia
+    row = _summarize_ia({
+        "identifier": "anatomyofhumanbo1918gray",
+        "title": "Anatomy of the human body",
+        "creator": ["Gray, Henry", "Lewis, W. H."],
+        "date": "1918-01-01T00:00:00Z",
+        "language": "eng", "ocr": "tesseract 5.0", "downloads": 12,
+    })
+    assert row["id"] == "anatomyofhumanbo1918gray"
+    assert row["year"] == "1918"
+    assert row["creator"] == "Gray, Henry | Lewis, W. H."
+    assert row["has_ocr"] is True
+    assert row["ref"] == (
+        "https://archive.org/details/anatomyofhumanbo1918gray")
+    from iiif_utils.providers import _guess_provider
+    assert _guess_provider(row["ref"], {"default_provider": "generic"}) == "ia"
+
+
+def test_search_catalog_offers_ia_provider():
+    r = CliRunner().invoke(cli, ["search-catalog", "--help"])
+    assert r.exit_code == 0
+    assert "ia" in r.output
+    assert "--collection" in r.output
+
+
+def _make_ia_utils_index(path):
+    """Minimal ia-utils-dialect index: wide doc row, hocr_id PK, no
+    index_metadata."""
+    import sqlite3 as _sql
+    c = _sql.connect(path)
+    c.execute("CREATE TABLE document_metadata (id INTEGER PRIMARY KEY, "
+              "slug TEXT, ia_identifier TEXT, title TEXT, "
+              "creator_primary TEXT, publisher TEXT, publication_date TEXT)")
+    c.execute("INSERT INTO document_metadata VALUES "
+              "(1,'x','chargoog','Lectures','Charcot','New Syd.','1877')")
+    c.execute("CREATE TABLE text_blocks (page_id INT, block_number INT, "
+              "hocr_id TEXT PRIMARY KEY, block_type TEXT, language TEXT, "
+              "text_direction TEXT, bbox_x0 INT, bbox_y0 INT, bbox_x1 INT, "
+              "bbox_y1 INT, text TEXT, line_count INT, length INT, "
+              "avg_confidence FLOAT, avg_font_size INT, "
+              "parent_carea_id TEXT)")
+    c.execute("INSERT INTO text_blocks VALUES (254,0,'par_1','ocr_par',NULL,"
+              "NULL,10,20,110,60,'nervous system lectures',1,23,88.5,NULL,"
+              "NULL)")
+    c.execute("CREATE TABLE page_numbers (leaf_num INTEGER PRIMARY KEY, "
+              "book_page_number TEXT, confidence INT, pageProb INT, "
+              "wordConf INT)")
+    c.execute("INSERT INTO page_numbers VALUES (254,'209',100,93,99)")
+    c.commit()
+    c.close()
+
+
+def test_migrate_index_translates_dialect(tmp_path):
+    import sqlite3 as _sql
+    src = tmp_path / "old.sqlite"
+    _make_ia_utils_index(src)
+    before = src.read_bytes()
+
+    r = CliRunner().invoke(cli, ["migrate-index", str(src)])
+    assert r.exit_code == 0, r.output
+    out = tmp_path / "old_iiif.sqlite"
+    assert out.exists()
+    # Non-destructive: the source is untouched
+    assert src.read_bytes() == before
+
+    c = _sql.connect(out)
+    meta = {k: v for k, v in c.execute(
+        "SELECT key, value FROM index_metadata")}
+    assert meta["provider"] == "ia"
+    assert meta["index_mode"] == "migrated"
+    assert meta["migrated_tool"] == "ia-utils"
+    assert "get-page unavailable" in meta["migration_limits"]
+    assert meta["manifest_url"].endswith("chargoog/manifest.json")
+
+    doc = {k: v for k, v in c.execute(
+        "SELECT key, value FROM document_metadata")}
+    assert doc["title"] == "Lectures"
+    assert doc["identifier:ia"] == "chargoog"
+    assert doc["creator"] == "Charcot"        # creator_primary → creator
+    assert doc["ia_details_url"].endswith("/details/chargoog")
+
+    tb = c.execute("SELECT * FROM text_blocks").fetchone()
+    cols = [d[0] for d in c.execute("SELECT * FROM text_blocks").description]
+    row = dict(zip(cols, tb))
+    assert row["alto_id"] == "par_1"          # hocr_id → alto_id
+    assert row["word_count"] == 3             # derived, absent in ia-utils
+    assert row["avg_confidence"] == 88.5
+    # page_numbers carried; image columns explicitly unavailable
+    pn = dict(zip(
+        [d[0] for d in c.execute("SELECT * FROM page_numbers").description],
+        c.execute("SELECT * FROM page_numbers").fetchone()))
+    assert pn["book_page_number"] == "209" and pn["pageProb"] == 93
+    assert pn["image_service_url"] is None
+    # FTS was built
+    assert c.execute("SELECT count(*) FROM text_blocks_fts "
+                     "WHERE text_blocks_fts MATCH 'nervous'").fetchone()[0] == 1
+
+
+def test_migrate_index_refuses_to_clobber_source(tmp_path):
+    src = tmp_path / "old.sqlite"
+    _make_ia_utils_index(src)
+    r = CliRunner().invoke(cli, ["migrate-index", str(src), "-o", str(src)])
+    assert r.exit_code != 0
+    assert "Refusing" in r.output
+
+
+def test_migrate_index_rejects_already_migrated(tmp_path):
+    import sqlite3 as _sql
+    src = tmp_path / "already.sqlite"
+    _make_ia_utils_index(src)
+    c = _sql.connect(src)
+    c.execute("CREATE TABLE index_metadata (key TEXT PRIMARY KEY, value TEXT)")
+    c.commit()
+    c.close()
+    r = CliRunner().invoke(cli, ["migrate-index", str(src)])
+    assert r.exit_code != 0
+    assert "iiif-utils index" in r.output
 
 
 def test_alto_minimal_parse():
