@@ -528,6 +528,7 @@ breaking schema-aware consumers.
 | `wellcome` | ✓ ships | resolves b-number → `iiif.wellcomecollection.org/presentation/{b}` (v3) | per-canvas ALTO via `seeAlso` (verified ABBYY pipeline) | `search-catalog -P wellcome` (Wellcome Catalogue v2 API) |
 | `loc` | ✓ ships | **synthesized** in memory from `loc.gov/item/{lccn}/?fo=json` (LoC has no Presentation manifest at a clean URL) | per-canvas ALTO when present (modern Tesseract 5.5 backfill); per-canvas plain text otherwise — Vesalius *Fabrica* (LCCN 49043519, 733 canvases) indexes via this branch | `search-catalog -P loc` (loc.gov search?fo=json) |
 | `mdz` (Munich Digitisation Centre) | ✓ ships | direct manifest URL or BSB id; adapter **injects** per-canvas hOCR seeAlso pointing at `/ocr/{bsb_id}/{N}` (URL is **not** in the manifest itself) | per-canvas **hOCR** parsed by `core/hocr.py` (lxml, ocrx_block granularity) | not wired |
+| `ia` (Internet Archive) | ✓ ships | `iiif.archive.org/iiif/{identifier}/manifest.json` (v3) | **whole-book** `_hocr.html`, or `_djvu.xml` for pre-hOCR scans — both listed in the manifest's `rendering` array, parsed once via the monolithic branch. Also consumes IA's `_page_numbers.json` for authoritative printed page numbers | `search-catalog -P ia` (advancedsearch.php, Lucene) |
 | `bodleian` | image-only via `generic` | direct manifest URL | no per-canvas OCR on the manuscripts we sampled | not wired |
 | **`gallica` (BnF)** | **deferred** — image-only works via `generic` (just pass the manifest URL), but full FTS blocked | manifest + IIIF Image API reachable; OCR (`.texteBrut`, `.alto`) **gated behind a security challenge** ("Vérification de sécurité") from non-FR networks; SRU search reachable | not wired |
 | **BIU Santé Paris / Numerabilis** | deferred — non-IIIF | PDFs only at `numerabilis.u-paris.fr/.../pdf/livre{N}.pdf` (the Vesalius 1543 critical edition with Latin transcription + French translation) | would need a `pdf` provider kind (see §10) | not wired |
@@ -553,8 +554,214 @@ per canvas: `block_number=0`, `block_type='ocr_page'`, full text in
 `text`, all bbox/confidence/font fields NULL. FTS still works at
 page granularity; bbox queries and figure extraction don't.
 
-`index_metadata.ocr_source` distinguishes the four cases:
-`alto` | `text_plain` | `mixed` | `none`.
+`index_metadata.ocr_source` distinguishes the cases:
+`alto` | `hocr` | `text_plain` | `djvu` | `mixed` | `none`.
+
+### Monolithic (whole-book) OCR as a source
+
+Every source above is *per-canvas*: one OCR file per page, addressed
+from that canvas's `seeAlso`. Internet Archive doesn't work that way —
+it publishes one OCR file for the entire book, `{id}_hocr.html`
+(modern items) or `{id}_djvu.xml` (older scans). Both are listed in
+the manifest's top-level **`rendering`** array, not `seeAlso`; only
+the sidecar metadata (pageindex, page numbers, MARC, scandata) is in
+`seeAlso`. The IA adapter surfaces both arrays' derivatives as
+`ia_*_url` document-metadata keys.
+
+`create-index` falls back to this branch when no canvas yielded
+per-canvas OCR: one fetch, one multipage parse
+(`core.hocr.parse_hocr_multipage` / `core.djvu.parse_djvu_multipage`),
+producing exactly the same `text_blocks` rows as the per-canvas
+branches. `index_metadata.ocr_shape='monolithic'` records it.
+
+Notes, each verified against real items:
+
+- **Leaf mapping.** hOCR page divs carry `id="page_N"`, where N is the
+  leaf number and matches our canvas index directly; DjVu `OBJECT`
+  elements are positional. Cross-checked against ia-utils indexes of
+  the same books (Gray 1918: 37/37 sampled leaves identical; Charcot
+  1877: 28/29, the one difference being block *order* only — same 9
+  blocks, same 354 words, zero gained or lost).
+- **Trailing leaves.** IA's IIIF manifest can expose fewer canvases
+  than the book has leaves (Gray: 1402 canvases vs 1414 OCR pages).
+  Out-of-range leaves are dropped with a warning. Verified trailing,
+  not mid-book gaps — a gap would break alignment silently.
+- **Block order is document order**, not position-sorted (ia-utils
+  sorts). On multi-column pages the two differ. This is deliberate per
+  WORD_GEOMETRY_PLAN §3.5: raw OCR order is what gets stored, and
+  reading order becomes a derived view. FTS is order-independent.
+- **Confidence.** The monolithic hOCR path retains per-block mean
+  `x_wconf` (the ia-utils dialect always did); the per-canvas hOCR
+  path still writes NULL, preserving the §3.5 invariant.
+- **DjVu axis order.** DjVu word coords are `left,bottom,right,top` —
+  converted once in `core.djvu` to the `x0,y0,x1,y1` convention every
+  other parser uses. Downstream code never sees raw DjVu order.
+
+### Provider-authoritative page numbers
+
+`book_page_number` normally comes from the canvas label. For IA that
+would be wrong: IA's labels are sequential counters, so leaf 24 of
+Gray 1918 (printed page 20) is labelled '25'. IA instead publishes
+`{id}_page_numbers.json` from its own detector, with per-leaf
+`confidence` / `pageProb` / `wordConf` — which is exactly why
+`page_numbers` carries those three columns (§3.4).
+
+When a provider supplies such a map it is treated as **exhaustive**: a
+leaf missing from it is deliberately unnumbered (cover, plates,
+endpapers), and we write NULL rather than falling back to the label —
+falling back would invent page numbers for precisely the pages the
+detector declined to number. With this rule, page numbers agree with
+ia-utils on 1402/1402 leaves (Gray) and 563/563 (Charcot).
+
+### 3.8 `page_words` — word geometry and derived reading order
+
+Implements `WORD_GEOMETRY_PLAN.md`. OCR reading order is a lossy
+*rendering*, not data. We retain per-word boxes at index time
+(`page_words(page_id, blob)`) so reading order becomes a derived view:
+a miscoded book is then a wrong rendering, fixable by flipping one
+metadata value, never a corrupted index.
+
+Populated from every source that carries word boxes — hOCR (box +
+`x_wconf` + `x_fsize`), ALTO (box + `WC`), DjVu (box + confidence, no
+font size) — and always-on when geometry exists. Measured on
+`assessedpollscit1965newt`: 1,141 pages / 4.9 MB on a 1,166-leaf
+volume, in line with the plan's 3–4 MB prior.
+
+**Codec divergence from the plan.** The plan's §4 codec is
+geometry-only plus a `tpl` side table for the ~1.5% of lines whose
+token count differs from their box count — a shape that exists because
+in the source deployment the text lives elsewhere and must be re-paired
+at read time. Our blob carries its own tokens instead. That removes
+`tpl` entirely and makes `page_words` impossible to desynchronize from
+`text_blocks` by any later change to block filtering or ordering. The
+token bytes compress to roughly the size of the geometry columns.
+`index_metadata.words_schema` versions the format.
+
+**Layout modes** (`core/layout.py`, surfaced by `render-page`):
+
+| mode | grouping | quotable |
+|---|---|---|
+| `raw` | OCR order, verbatim | yes |
+| `columns` | cluster by x, read each top-to-bottom | no |
+| `table` | cluster by y, read each left-to-right | no |
+
+Reconstructed output is evidence of what is on the page, not a
+transcription — hence `quotable: false` (§3.4 of the plan). FTS stays
+on raw OCR order, so a miscoded layout can never poison search.
+
+Mode selection has three layers of authority: `index_metadata.
+layout_default` (set by `create-index --layout`) → per-call `--layout`
+→ detection **as a labeled hint only**. Detection never selects the
+mode; silent auto-detection is what converts a wrong guess into
+invisible corruption.
+
+**The detector is not calibrated.** §7 requires ~40 labeled pages
+before a confidence number ships, and that exercise has not been run.
+`LayoutHint.calibrated` is therefore `False`, and
+`contradiction_warning` returns None while it is — a warning sourced
+from an unvalidated classifier is worse than none, because acting on
+it means switching to the wrong layout. Known miss: on the poll-book
+fixture (leaf 533, a genuine table) it reports `raw` at 0.67. That is
+defensible at line granularity — hOCR's own `ocr_line` grouping
+already yields correct rows there — but wrong as a page verdict.
+
+Verified against the plan's §7 fixture: `assessedpollscit1965newt`
+leaf 533 in `table` mode reproduces the reference rows exactly —
+`V 15 Smakula, Alexander same Physicist 1900` and `VY 15 Smakula,
+Erika E, same esearch Chem. 1909` — with 58 rows of ≥4 fields. Note
+the leaf is **533**, not the plan's 530: the plan's prototype read
+DjVu positionally, and that item's DjVu is sparse (see below).
+
+### DjVu leaf numbering is not trustworthy
+
+Discovered while validating the above, and worth stating plainly
+because it is a silent-misalignment trap. DjVu `OBJECT` elements carry
+`usemap="{id}_NNNN.djvu"`, a 1-based leaf-file number; we use it
+(minus 1) in preference to sequence position, which is what ia-utils
+used. But neither is universally right:
+
+- `ecturesondiseas00chargoog`: 563 OBJECTs, usemap 1..563, contiguous.
+  DjVu agrees with hOCR and with the canvas count.
+- `assessedpollscit1965newt`: 1,166 OBJECTs, usemap 1..1168 with a gap
+  at 293–294, while its hOCR has 1,170 contiguous pages. The page
+  holding a known record is DjVu leaf 532 but hOCR leaf 533.
+
+No single offset reconciles both, so DjVu leaf numbering is an
+independent sequence from the hOCR page ids the rest of the IA path
+uses. `djvu_alignment_warning` fires whenever the DjVu leaves are
+non-contiguous or the count disagrees with the canvases, rather than
+letting text attach silently to the wrong images. This is a further
+reason DjVu stays a fallback for items with no hOCR at all.
+
+### Migrating ia-utils indexes
+
+`migrate-index` converts an existing ia-utils SQLite into this dialect,
+always writing a NEW file and never touching the source. It is a schema
+translation, not a re-index: `document_metadata` is unpivoted from
+ia-utils' wide row into our key/value shape, `text_blocks.hocr_id`
+becomes `alto_id`, `word_count` is derived from the stored text, and
+`index_metadata` is stamped so a shelf scanner can identify the file.
+
+Two things it cannot reconstruct, both recorded in
+`index_metadata.migration_limits` rather than left to be discovered:
+
+- **Canvas / image columns are NULL** — ia-utils addressed images
+  through IA's download endpoints rather than IIIF image services, so
+  `get-page` and friends don't work on a migrated index.
+- **No `page_words`** — word geometry requires re-parsing the OCR
+  source, so layout modes are unavailable.
+
+For either, rebuild from the identifier instead (the migrated
+`identifier:ia` tells you what to pass). Migration is the cheap path
+for books you only need to search; verified against a real ia-utils
+index with 16/16 sampled leaves textually identical to a freshly-built
+one.
+
+### Addressing a page: leaves vs printed pages
+
+Every page-addressing command takes the same two flags: `-l/--leaf`
+(0-based canvas index) and `-b/--book` (the printed page number). They
+are not interchangeable, and the distinction is load-bearing.
+
+**Leaves are integers; printed pages are TEXT.** A book's printed
+numbering includes roman front matter (`xii`), plate suffixes (`12a`)
+and folio forms, so `-b` accepts arbitrary labels. `parse_book_spec`
+expands a token like `100-150` only when both ends are numeric and
+otherwise treats it as a literal label; `parse_leaf_spec` is
+integer-only and, given `xii`, says so and points at `-b`.
+
+**A printed page number is not unique.** Plates repeat numbers, volumes
+bound together restart at 1, and the OCR page-number detector misreads.
+When several leaves carry the same printed page, `resolve_leaf` refuses
+and names the candidates rather than returning whichever row SQLite
+ordered first — silently picking one is how a figure gets cropped from
+the wrong page and nobody notices. Disambiguate with `-l`.
+
+**Two names, one number — and both are emitted.** The CLI addresses
+pages as *leaves* (`-l/--leaf`), while the IIIF side of the vocabulary
+calls the same number a *canvas*: `OUTLINE_SCHEMA`'s `canvas_start` /
+`canvas_end`, and the `canvas` key that `search-index` and
+`list-figures` have always emitted. They are the same value —
+`text_blocks.page_id` and `page_numbers.leaf_num` agree with zero
+mismatches, and `OUTLINE_SCHEMA` documents it as "First canvas
+(page_numbers.leaf_num)".
+
+Emitting only one name per command was not merely untidy: it broke
+joins *across* commands, which is the natural way to use them together.
+
+```python
+hits  = search-index(...)     # emitted only "canvas"
+stats = get-page-stats(...)   # emitted only "leaf"
+by_leaf[h["leaf"]]            # KeyError: 'leaf'
+```
+
+CSV was worse — `canvas,page,snippet` unions with `leaf,page,blocks,…`
+into two half-populated columns rather than failing outright. So every
+page-addressed record now carries **both** keys via
+`utils.page.page_ref()`: `leaf` first (leading table/CSV column order,
+matching the flags), `canvas` retained so existing consumers — the
+build-outline pipeline, corpus scripts — keep working. A test asserts
+the two never disagree.
 
 ### HTTP retry & rate-limit handling
 
@@ -1139,17 +1346,37 @@ the manifest in this order and uses whichever it finds first
 
 ## 7. Identifiers, slugs, filenames
 
-`ia-utils` slugs index files using metadata (title, creator, date, IA
-identifier). We preserve this behavior:
+Index files are named from the provider and the work's identifier
+within it:
 
 ```
-{provider-key}_{slug-of-title}_{year}_{identifier}.sqlite
+{provider-key}_{identifier}.sqlite
 ```
 
-e.g. `wellcome_hand-atlas-of-human-anatomy_1923_b31362138.sqlite`.
+e.g. `wellcome_b31362138.sqlite`, `ia_anatomyofhumanbo1918gray.sqlite`,
+`mdz_bsb00056329.sqlite`.
 
-Including the provider key prevents collisions across providers and makes a
-mixed-provider directory navigable.
+**Deliberately not title-derived.** Earlier versions interpolated a
+slug of the manifest label. Manifest labels vary between editions and
+get corrected over time — this corpus has already had to fix edition
+mislabels — so a title-based filename can drift or actively mislead,
+and two printings of the same work produce confusingly similar names.
+The identifier is stable and round-trips: from `ia_<id>.sqlite` you can
+reconstruct the exact ref that built it. The title is still available
+in `document_metadata` and via `info`.
+
+Including the provider key prevents collisions across providers and
+makes a mixed-provider directory navigable.
+
+Identifier resolution order (`create_index.provider_identifier`):
+
+1. Wellcome b-number found in the manifest URL, including any
+   child-volume suffix (`b22396147_0003`) — without the suffix every
+   volume of a multi-volume Collection would collide.
+2. A provider-supplied `identifier:*` from extra metadata —
+   `gallica_ark`, `heidelberg_diglit`, `bsb`, `lccn`, `ia`.
+3. Fallback: the slugified manifest URL, truncated. Only the `generic`
+   provider should reach this.
 
 ---
 

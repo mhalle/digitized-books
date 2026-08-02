@@ -7,8 +7,23 @@ hOCR has no `<Illustration>` analog, so `illustrations` will be empty.
 Adapted from `ia-utils/core/parser.py::parse_hocr`. Uses lxml (which we
 already depend on) instead of BeautifulSoup.
 
+Two entry points:
+
+  - `parse_hocr_bytes` — one page per file (MDZ's per-canvas hOCR).
+    Blocks are `ocrx_block` elements; confidence is deliberately dropped
+    (see the invariant note at the bottom of `_page_from_el` callers).
+  - `parse_hocr_multipage` — one monolithic file for the whole book
+    (IA's `{id}_hocr.html`). Every `ocr_page` div is parsed; the leaf
+    number comes from the div's `id="page_N"` (falling back to sequence
+    order). IA's Tesseract output nests paragraphs under `ocr_carea`
+    column areas, so blocks are `ocr_par` / `ocr_caption` / `ocr_header`
+    / `ocr_textfloat` — mirroring ia-utils' full-hOCR mode — and
+    per-block mean `x_wconf` IS retained (the ia-utils dialect always
+    stored it).
+
 hOCR class taxonomy:
   ocr_page    one per page
+  ocr_carea   column area (Tesseract)
   ocrx_block  layout block (OCR engine's notion)
   ocr_par     paragraph
   ocr_line    single text line
@@ -22,6 +37,7 @@ from __future__ import annotations
 
 import re
 from statistics import mean
+from typing import Any
 
 from lxml import html as lxml_html
 
@@ -30,6 +46,14 @@ from iiif_utils.core.alto import AltoPage, Illustration, TextBlock
 _BBOX_RE = re.compile(r"bbox\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)")
 _WCONF_RE = re.compile(r"x_wconf\s+(\d+)")
 _FSIZE_RE = re.compile(r"x_fsize\s+(\d+)")
+_PAGE_ID_RE = re.compile(r"page_0*(\d+)")
+
+# Block-level classes per source shape. MDZ per-canvas files use
+# `ocrx_block`; IA's monolithic Tesseract output uses paragraph-level
+# classes (same set ia-utils collected).
+_BLOCK_CLASSES_SINGLE = ("ocrx_block",)
+_BLOCK_CLASSES_TESSERACT = ("ocr_par", "ocr_caption", "ocr_header",
+                             "ocr_textfloat")
 
 
 def _parse_bbox(title: str) -> tuple[int, int, int, int] | None:
@@ -47,30 +71,37 @@ def _word_text(word_el: object) -> str:
     return str(text_content()).strip()
 
 
-def parse_hocr_bytes(content: bytes) -> AltoPage:
-    """Parse hOCR bytes (text/vnd.hocr+html) into our AltoPage shape.
+def _class_xpath(classes: tuple[str, ...]) -> str:
+    preds = " or ".join(
+        f"contains(concat(' ', normalize-space(@class), ' '), ' {c} ')"
+        for c in classes
+    )
+    return f"descendant::*[{preds}]"
 
-    Granularity: one row per `ocrx_block` element (matching the §3.5
-    decision for ALTO TextBlocks). Pages with no text yield zero rows.
-    """
-    root = lxml_html.fromstring(content)  # type: ignore[no-untyped-call]
-    # ocr_page — one per page; we only handle the first (one canvas per file).
-    pages = root.xpath("//*[contains(concat(' ', normalize-space(@class), ' '),"
-                       " ' ocr_page ')]")
-    if not pages:
-        return AltoPage(page_w=0, page_h=0, measurement_unit="pixel",
-                         text_blocks=[], illustrations=[])
-    page_el = pages[0]
+
+def _el_class(el: Any, classes: tuple[str, ...]) -> str | None:
+    """First class from `classes` present on the element, if any."""
+    have = (el.get("class") or "").split()
+    for c in classes:
+        if c in have:
+            return c
+    return None
+
+
+def _page_from_el(page_el: Any, block_classes: tuple[str, ...],
+                   keep_confidence: bool) -> AltoPage:
+    """Parse one `ocr_page` element into an AltoPage."""
     page_bbox = _parse_bbox(page_el.get("title") or "")
     page_w = page_bbox[2] if page_bbox else 0
     page_h = page_bbox[3] if page_bbox else 0
 
-    blocks_xp = ("descendant::*[contains(concat(' ', "
-                  "normalize-space(@class), ' '), ' ocrx_block ')]")
-    block_els = page_el.xpath(blocks_xp)
+    block_els = page_el.xpath(_class_xpath(block_classes))
+
+    from iiif_utils.core.wordgeom import PageWords, Word
+    page_words: list[Word] = []
+    words_per_line: list[int] = []
 
     text_blocks: list[TextBlock] = []
-    avg_conf: float | None = None  # set per-block below
     for bn, block in enumerate(block_els):
         title = block.get("title") or ""
         bbox = _parse_bbox(title)
@@ -103,7 +134,36 @@ def parse_hocr_bytes(content: bytes) -> AltoPage:
             "descendant::*[contains(concat(' ', normalize-space(@class),"
             " ' '), ' ocr_line ')]"
         )
-        avg_conf = mean(confs) if confs else None
+        avg_conf = mean(confs) if (keep_confidence and confs) else None
+
+        # Word geometry, walked per line in the same order as the block
+        # text above. x_fsize is retained because it makes heading
+        # detection structural rather than regex-based (§3.6).
+        for line_el in line_els:
+            n_in_line = 0
+            for w in line_el.xpath(
+                "descendant::*[contains(concat(' ', normalize-space(@class),"
+                " ' '), ' ocrx_word ')]"
+            ):
+                t = _word_text(w)
+                if not t:
+                    continue
+                wbox = _parse_bbox(w.get("title") or "")
+                if wbox is None:
+                    continue
+                wx0, wy0, wx1, wy1 = wbox
+                wt = w.get("title") or ""
+                mc = _WCONF_RE.search(wt)
+                mf = _FSIZE_RE.search(wt)
+                page_words.append(Word(
+                    text=t, x=wx0, y=wy0,
+                    w=max(0, wx1 - wx0), h=max(0, wy1 - wy0),
+                    conf=int(mc.group(1)) if mc else None,
+                    fsize=int(mf.group(1)) if mf else None,
+                ))
+                n_in_line += 1
+            if n_in_line:
+                words_per_line.append(n_in_line)
 
         text_blocks.append(TextBlock(
             block_number=bn,
@@ -113,15 +173,9 @@ def parse_hocr_bytes(content: bytes) -> AltoPage:
             word_count=len(word_els),
             length=len(text),
             bbox_x0=x0, bbox_y0=y0, bbox_x1=x1, bbox_y1=y1,
+            avg_confidence=avg_conf,
+            block_type=_el_class(block, block_classes),
         ))
-
-    # AltoPage carries the same dataclass; avg_confidence is stored on
-    # AltoPage indirectly through TextBlock (we don't propagate it here
-    # because the existing TextBlock doesn't have a confidence field —
-    # the write-side maps `avg_confidence=None` for ALTO too. hOCR
-    # confidence is available in source but currently dropped at this
-    # boundary, mirroring the §3.5 'NULL for Wellcome ALTO' invariant.)
-    _ = avg_conf  # acknowledged but not stored (see note above)
 
     illustrations: list[Illustration] = []  # hOCR has no Illustration analog
     return AltoPage(
@@ -130,4 +184,52 @@ def parse_hocr_bytes(content: bytes) -> AltoPage:
         measurement_unit="pixel",  # hOCR bboxes are always image pixels
         text_blocks=text_blocks,
         illustrations=illustrations,
+        words=(PageWords(words=page_words,
+                          words_per_line=words_per_line)
+               if page_words else None),
     )
+
+
+def _page_els(content: bytes) -> list[Any]:
+    root = lxml_html.fromstring(content)  # type: ignore[no-untyped-call]
+    return list(root.xpath(
+        "//*[contains(concat(' ', normalize-space(@class), ' '),"
+        " ' ocr_page ')]"
+    ))
+
+
+def parse_hocr_bytes(content: bytes) -> AltoPage:
+    """Parse hOCR bytes (text/vnd.hocr+html) into our AltoPage shape.
+
+    Granularity: one row per `ocrx_block` element (matching the §3.5
+    decision for ALTO TextBlocks). Pages with no text yield zero rows.
+
+    Confidence is available in source but deliberately dropped at this
+    boundary (avg_confidence=None), mirroring the §3.5 'NULL for
+    Wellcome ALTO' invariant on per-canvas sources.
+    """
+    pages = _page_els(content)
+    if not pages:
+        return AltoPage(page_w=0, page_h=0, measurement_unit="pixel",
+                         text_blocks=[], illustrations=[])
+    # One canvas per file — only the first page element counts.
+    return _page_from_el(pages[0], _BLOCK_CLASSES_SINGLE,
+                          keep_confidence=False)
+
+
+def parse_hocr_multipage(content: bytes) -> list[tuple[int, AltoPage]]:
+    """Parse a monolithic hOCR file (IA's `{id}_hocr.html`).
+
+    Returns (leaf_number, AltoPage) pairs in document order. The leaf
+    number is taken from each page div's `id="page_N"`; sequence order
+    is the fallback when the id is absent or unparseable. Pages with no
+    text are still returned (empty text_blocks) so callers get page
+    dims for every leaf.
+    """
+    out: list[tuple[int, AltoPage]] = []
+    for seq, page_el in enumerate(_page_els(content)):
+        m = _PAGE_ID_RE.search(page_el.get("id") or "")
+        leaf = int(m.group(1)) if m else seq
+        out.append((leaf, _page_from_el(page_el, _BLOCK_CLASSES_TESSERACT,
+                                          keep_confidence=True)))
+    return out

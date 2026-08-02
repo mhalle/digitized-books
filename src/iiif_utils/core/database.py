@@ -86,6 +86,19 @@ def write_illustrations(db: sqlite_utils.Database,
     )
 
 
+def write_page_words(db: sqlite_utils.Database,
+                      rows: list[dict[str, Any]]) -> None:
+    """Per-page packed word geometry (WORD_GEOMETRY_PLAN §4).
+
+    Rows are {page_id, blob}. Written whenever the OCR source carries
+    word boxes, so reading order stays a derived view.
+    """
+    if not rows:
+        return
+    _table(db, "page_words").insert_all(rows, pk="page_id", replace=True,
+                                         batch_size=200)
+
+
 def write_ranges(db: sqlite_utils.Database, rows: list[dict[str, Any]]) -> None:
     if not rows:
         return

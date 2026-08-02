@@ -9,6 +9,7 @@ from typing import Any
 import click
 
 from iiif_utils.utils import output as output_
+from iiif_utils.utils.page import page_ref
 
 # Hyphenated terms confuse FTS5 — quote them automatically.
 _HYPHEN = re.compile(r"\b[A-Za-z]+(-[A-Za-z]+)+\b")
@@ -55,7 +56,7 @@ def search_index(index: Path, query: str, blocks: bool, limit: int,
         """, (q, limit)))
         for r in db_rows:
             out.append({
-                "canvas": r["page_id"],
+                **page_ref(r["page_id"]),
                 "page": r["book_page_number"],
                 "block": r["block_number"],
                 "bbox": [r["bbox_x0"], r["bbox_y0"],
@@ -74,7 +75,7 @@ def search_index(index: Path, query: str, blocks: bool, limit: int,
         """, (q, limit)))
         for r in db_rows:
             out.append({
-                "canvas": r["page_id"],
+                **page_ref(r["page_id"]),
                 "page": r["book_page_number"],
                 "snippet": r["snip"],
             })

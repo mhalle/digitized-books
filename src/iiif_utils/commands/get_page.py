@@ -8,6 +8,7 @@ import click
 
 from iiif_utils.config import load_config
 from iiif_utils.core import http as http_
+from iiif_utils.core import image as image_mod
 from iiif_utils.core import image_api
 from iiif_utils.utils.page import resolve_leaf
 
@@ -27,11 +28,25 @@ from iiif_utils.utils.page import resolve_leaf
                    " (use this if a server rejects '/full/full/').")
 @click.option("--format", "fmt", default="jpg")
 @click.option("--url-only", is_flag=True, default=False)
+@click.option("--autocontrast", is_flag=True, default=False,
+              help="Stretch contrast after download. Old letterpress "
+                   "scans are often flat and grey; this is what makes "
+                   "them legible.")
+@click.option("--cutoff", type=int, default=None,
+              help="Autocontrast cutoff percentage (default 2). Implies "
+                   "--autocontrast.")
+@click.option("--preserve-tone", is_flag=True, default=False,
+              help="Keep colour balance while autocontrasting. Implies "
+                   "--autocontrast.")
+@click.option("--quality", type=int, default=None,
+              help="JPEG quality, 1-95.")
 @click.option("--config", "config_path", type=click.Path(path_type=Path),
               default=None)
 def get_page(index: Path, leaf_num: int | None, book: str | None,
               output_path: Path | None, size: str, fmt: str,
-              url_only: bool, config_path: Path | None) -> None:
+              url_only: bool, autocontrast: bool, cutoff: int | None,
+              preserve_tone: bool, quality: int | None,
+              config_path: Path | None) -> None:
     """Download a whole canvas image."""
     aliases = {"small": "400,", "medium": "800,", "large": "1600,",
                "full": "full", "max": "max"}
@@ -58,5 +73,14 @@ def get_page(index: Path, leaf_num: int | None, book: str | None,
     if output_path is None:
         output_path = Path.cwd() / f"page_l{leaf_num}.{fmt}"
     content = http_.fetch_bytes(url, cfg_http=cfg.get("http", {}))
+
+    if image_mod.wants_processing(autocontrast=autocontrast, cutoff=cutoff,
+                                    preserve_tone=preserve_tone,
+                                    quality=quality):
+        content = image_mod.process_image(
+            content, output_format=fmt, quality=quality,
+            autocontrast=autocontrast, cutoff=cutoff,
+            preserve_tone=preserve_tone,
+        )
     output_path.write_bytes(content)
     click.echo(f"saved {output_path}  ({len(content)/1024:.1f} KB)")

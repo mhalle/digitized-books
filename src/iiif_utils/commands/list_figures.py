@@ -10,6 +10,7 @@ import click
 from iiif_utils.config import load_config
 from iiif_utils.core import image_api
 from iiif_utils.utils import output as output_
+from iiif_utils.utils.page import page_ref
 
 
 @click.command(name="list-figures")
@@ -70,7 +71,7 @@ def list_figures(index: Path, leaf_num: int | None, all_pages: bool,
         url = (image_api.region_url(r["image_service_url"], bbox, size=size)
                 if r["image_service_url"] else None)
         out_rows.append({
-            "canvas": r["page_id"],
+            **page_ref(r["page_id"]),
             "n": r["illustration_number"],
             "page": r["book_page_number"],
             "type": r["illustration_type"],

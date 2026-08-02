@@ -68,9 +68,10 @@ def resolve(ref: str, *, cfg: dict[str, Any], explicit_provider: str | None = No
         return _resolve_gallica(ref, cfg=cfg, cfg_http=cfg_http,
                                  cache_dir=cache_dir)
 
-    # Internet Archive — thin v3 viewer adapter. No OCR injection; IA
-    # serves a single monolithic hOCR file, not per-canvas. For full-text
-    # indexing of IA items, use the sibling ia-utils package.
+    # Internet Archive — v3 adapter. No per-canvas OCR injection; IA
+    # serves one monolithic hOCR / DjVu-XML file per book, which the
+    # adapter surfaces as extra-metadata URLs for create-index's
+    # monolithic branch.
     if provider_key == "ia":
         return _resolve_ia(ref, cfg=cfg, cfg_http=cfg_http,
                             cache_dir=cache_dir)
@@ -109,7 +110,7 @@ def _guess_provider(ref: str, cfg: dict[str, Any]) -> str:
         if host == "gallica.bnf.fr":
             return "gallica"
         # Internet Archive — details/download/iiif hostnames all route
-        # to the ia provider (viewing/cropping only; not indexing).
+        # to the ia provider.
         if host in ("archive.org", "www.archive.org", "iiif.archive.org"):
             return "ia"
         # Hostname → provider key, if any configured provider declares an iiif_base
