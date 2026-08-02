@@ -28,7 +28,7 @@ import click
 from iiif_utils.config import load_config
 from iiif_utils.core import http as http_
 from iiif_utils.core import image_api
-from iiif_utils.utils.page import resolve_leaf
+from iiif_utils.utils.page import page_ref, resolve_leaf
 
 # Map common ISO-639-3 / display-name language values stored in IIIF
 # manifests / catalogue records to Tesseract's language codes.
@@ -206,7 +206,7 @@ def ocr_page(index: Path, leaf_num: int | None, book: str | None,
 
     if output_format == "json":
         result_obj: dict[str, Any] = {
-            "leaf": leaf,
+            **page_ref(leaf),
             "book_page_number": (book if book is not None
                                   else _book_page(conn, leaf)),
             "bbox": list(bbox) if bbox else None,

@@ -28,7 +28,7 @@ import click
 from iiif_utils.core import layout as layout_mod
 from iiif_utils.core import wordgeom
 from iiif_utils.utils import output as output_
-from iiif_utils.utils.page import resolve_leaf
+from iiif_utils.utils.page import page_ref, resolve_leaf
 
 
 @click.command(name="render-page")
@@ -88,7 +88,7 @@ def render_page(index: Path, leaf: int | None, book_page: str | None,
     rendering = layout_mod.render(page, configured, page_width=page_width)
 
     rec: dict[str, Any] = {
-        "canvas": leaf_num,
+        **page_ref(leaf_num),
         "layout": rendering.layout,
         "quotable": rendering.quotable,
         "lines": len(rendering.lines),

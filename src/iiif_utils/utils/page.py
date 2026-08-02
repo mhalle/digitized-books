@@ -76,6 +76,24 @@ def parse_book_spec(spec: str) -> list[str]:
     return out
 
 
+def page_ref(index: int) -> dict[str, int]:
+    """Both names for a page's index, for record output.
+
+    The CLI addresses pages as *leaves* (`-l/--leaf`) while the IIIF
+    side of the vocabulary — `OUTLINE_SCHEMA`'s `canvas_start` /
+    `canvas_end`, `search-index`, `list-figures` — calls the same number
+    a *canvas*. Emitting both means a consumer joining records across
+    commands succeeds whichever name it reaches for, instead of dying on
+    a KeyError when it pipes `search-index` output into `get-page-stats`
+    output.
+
+    `leaf` is listed first so it leads in table/CSV column order,
+    matching the flags; `canvas` is kept so existing consumers (the
+    build-outline pipeline, corpus scripts) keep working.
+    """
+    return {"leaf": index, "canvas": index}
+
+
 def resolve_leaf(conn: sqlite3.Connection,
                   leaf: int | None,
                   book: str | None) -> int:

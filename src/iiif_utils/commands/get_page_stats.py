@@ -17,7 +17,7 @@ from typing import Any
 import click
 
 from iiif_utils.utils import output as output_
-from iiif_utils.utils.page import parse_book_spec, parse_leaf_spec
+from iiif_utils.utils.page import page_ref, parse_book_spec, parse_leaf_spec
 
 
 @click.command(name="get-page-stats")
@@ -77,7 +77,7 @@ def get_page_stats(index: Path, leaf_spec: str | None, book_spec: str | None,
             continue
         conf = r["avg_confidence"]
         recs.append({
-            "leaf": r["leaf"],
+            **page_ref(r["leaf"]),
             "page": r["page"],
             "blocks": r["blocks"],
             "lines": r["lines"],

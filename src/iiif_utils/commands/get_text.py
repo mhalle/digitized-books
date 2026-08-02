@@ -31,7 +31,7 @@ from iiif_utils.core import http as http_
 from iiif_utils.core import manifest as manifest_mod
 from iiif_utils.providers import resolve
 from iiif_utils.utils import output as output_
-from iiif_utils.utils.page import parse_book_spec, parse_leaf_spec
+from iiif_utils.utils.page import page_ref, parse_book_spec, parse_leaf_spec
 
 
 @click.command(name="get-text")
@@ -157,7 +157,7 @@ def _per_page_text(index: Path, *, leaf_spec: str | None,
             ORDER BY tb.page_id, tb.block_number
         """, leaves):
             rows.append({
-                "leaf": r["page_id"],
+                **page_ref(r["page_id"]),
                 "page": r["book_page_number"],
                 "block": r["block_number"],
                 "block_type": r["block_type"],
@@ -178,7 +178,7 @@ def _per_page_text(index: Path, *, leaf_spec: str | None,
             ORDER BY tb.page_id
         """, leaves):
             rows.append({
-                "leaf": r["page_id"],
+                **page_ref(r["page_id"]),
                 "page": r["book_page_number"],
                 "text": r["page_text"],
             })

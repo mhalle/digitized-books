@@ -737,10 +737,31 @@ and names the candidates rather than returning whichever row SQLite
 ordered first — silently picking one is how a figure gets cropped from
 the wrong page and nobody notices. Disambiguate with `-l`.
 
-Terminology note: the CLI says *leaf* while the outline schema says
-*canvas* (`canvas_start` / `canvas_end`) and `search-index` /
-`list-figures` emit a `canvas` key. These are the same number — the IA
-and IIIF names for it respectively.
+**Two names, one number — and both are emitted.** The CLI addresses
+pages as *leaves* (`-l/--leaf`), while the IIIF side of the vocabulary
+calls the same number a *canvas*: `OUTLINE_SCHEMA`'s `canvas_start` /
+`canvas_end`, and the `canvas` key that `search-index` and
+`list-figures` have always emitted. They are the same value —
+`text_blocks.page_id` and `page_numbers.leaf_num` agree with zero
+mismatches, and `OUTLINE_SCHEMA` documents it as "First canvas
+(page_numbers.leaf_num)".
+
+Emitting only one name per command was not merely untidy: it broke
+joins *across* commands, which is the natural way to use them together.
+
+```python
+hits  = search-index(...)     # emitted only "canvas"
+stats = get-page-stats(...)   # emitted only "leaf"
+by_leaf[h["leaf"]]            # KeyError: 'leaf'
+```
+
+CSV was worse — `canvas,page,snippet` unions with `leaf,page,blocks,…`
+into two half-populated columns rather than failing outright. So every
+page-addressed record now carries **both** keys via
+`utils.page.page_ref()`: `leaf` first (leading table/CSV column order,
+matching the flags), `canvas` retained so existing consumers — the
+build-outline pipeline, corpus scripts — keep working. A test asserts
+the two never disagree.
 
 ### HTTP retry & rate-limit handling
 

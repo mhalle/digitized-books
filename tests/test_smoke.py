@@ -1864,6 +1864,45 @@ def test_leaf_book_flags_are_consistent_across_commands():
         assert "-b, --book" in out, f"{cmd} lacks -b/--book"
 
 
+def test_page_ref_emits_both_names():
+    from iiif_utils.utils.page import page_ref
+    assert page_ref(687) == {"leaf": 687, "canvas": 687}
+    # leaf leads, so it heads table/CSV column order like the flags
+    assert list(page_ref(1)) == ["leaf", "canvas"]
+
+
+def test_page_addressed_output_carries_both_keys(tmp_path):
+    """Records must join across commands whichever name is used —
+    search-index emitted only 'canvas' and get-page-stats only 'leaf',
+    so the natural join raised KeyError."""
+    import json as _json
+    idx = tmp_path / "join.sqlite"
+    _stats_index(idx)
+    # Give the index the FTS the search command needs
+    from iiif_utils.core import database as _db
+    _db.build_fts(_db.open_db(idx))
+
+    hits = _json.loads(CliRunner().invoke(
+        cli, ["search-index", "-i", str(idx), "-q", "word",
+              "--format", "json"]).output)
+    stats = _json.loads(CliRunner().invoke(
+        cli, ["get-page-stats", "-i", str(idx), "--format", "json"]).output)
+    texts = _json.loads(CliRunner().invoke(
+        cli, ["get-text", "-i", str(idx), "-l", "0", "--format",
+              "json"]).output)
+
+    for rows in (hits, stats, texts):
+        assert rows, "expected records to join over"
+        for r in rows:
+            assert r["leaf"] == r["canvas"], "the two names must agree"
+
+    # The join that used to raise KeyError now works from either side
+    by_leaf = {s["leaf"]: s for s in stats}
+    by_canvas = {s["canvas"]: s for s in stats}
+    assert all(h["leaf"] in by_leaf for h in hits)
+    assert all(h["canvas"] in by_canvas for h in hits)
+
+
 def test_alto_minimal_parse():
     page = alto.parse_alto_bytes(MINIMAL_ALTO)
     assert page.measurement_unit == "pixel"
