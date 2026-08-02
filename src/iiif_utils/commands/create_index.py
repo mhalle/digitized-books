@@ -20,6 +20,42 @@ from iiif_utils.utils.logger import Logger
 from iiif_utils.utils.slug import slugify
 
 
+# Wellcome b-number, plus optional child-volume suffix (`b22396147_0003`,
+# `b20416301_001`). Without the suffix every volume of a multi-volume
+# Collection would collide on one filename.
+_BNUM_IN_URL = re.compile(r"/(b\d{7}[\dx](?:_\d{3,4})?)(?:$|[/?])")
+
+# Provider-supplied identifier keys, in preference order. Checked before
+# falling back to the manifest URL, which slugifies into nonsense like
+# "httpsgallicabnffriiifark12148b".
+_IDENTIFIER_KEYS = (
+    "identifier:gallica_ark",
+    "identifier:heidelberg_diglit",
+    "identifier:bsb",
+    "identifier:lccn",
+    "identifier:ia",
+)
+
+
+def provider_identifier(ref_obj: Any) -> str:
+    """The work's stable identifier within its provider.
+
+    This is what names an index (`{provider}_{identifier}.sqlite`).
+    Deliberately NOT title-derived: manifest labels vary between
+    editions and get corrected over time, so a title-based filename can
+    drift or mislabel, while the identifier round-trips back to the ref
+    that built it.
+    """
+    m = _BNUM_IN_URL.search(ref_obj.manifest_url)
+    if m:
+        return m.group(1)
+    for key in _IDENTIFIER_KEYS:
+        val = ref_obj.extra_metadata.get(key)
+        if val:
+            return slugify(str(val), max_len=40)
+    return slugify(ref_obj.manifest_url)[:40]
+
+
 @click.command(name="create-index")
 @click.argument("ref")
 @click.option("-d", "--output-dir", "output_dir",
@@ -99,37 +135,8 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
 
     # Slug and output path
     title = manifest_mod.label_string(manifest.get("label")) or ref_obj.manifest_url
-    # Wellcome manifests: capture b-number plus optional child-volume suffix
-    # (`b22396147_0003`, `b20416301_001`). Without the suffix every volume
-    # of a multi-volume Collection would collide on a single filename.
-    bnum_match = re.search(r"/(b\d{7}[\dx](?:_\d{3,4})?)(?:$|[/?])",
-                            ref_obj.manifest_url)
-    # Identifier preference, in order:
-    # 1. Wellcome b-number in manifest URL (handles Wellcome with no extra_metadata)
-    # 2. Provider-supplied identifier in extra_metadata (heidelberg_diglit,
-    #    bsb, gallica_ark, lccn, etc.) — preferred for non-Wellcome providers
-    #    since slugifying the manifest URL produces nonsense like
-    #    "httpsgallicabnffriiifark12148b".
-    # 3. Fallback: slugified manifest URL truncated to 30 chars.
-    identifier: str
-    if bnum_match:
-        identifier = bnum_match.group(1)
-    else:
-        identifier = ""
-        for key in (
-            "identifier:gallica_ark",
-            "identifier:heidelberg_diglit",
-            "identifier:bsb",
-            "identifier:lccn",
-            "identifier:ia",
-        ):
-            val = ref_obj.extra_metadata.get(key)
-            if val:
-                identifier = slugify(str(val), max_len=30)
-                break
-        if not identifier:
-            identifier = slugify(ref_obj.manifest_url)[:30]
-    slug = f"{ref_obj.provider_key}_{slugify(title, max_len=40)}_{identifier}"
+    identifier = provider_identifier(ref_obj)
+    slug = f"{ref_obj.provider_key}_{identifier}"
     if output_path is None:
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / f"{slug}.sqlite"

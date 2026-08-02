@@ -1300,17 +1300,37 @@ the manifest in this order and uses whichever it finds first
 
 ## 7. Identifiers, slugs, filenames
 
-`ia-utils` slugs index files using metadata (title, creator, date, IA
-identifier). We preserve this behavior:
+Index files are named from the provider and the work's identifier
+within it:
 
 ```
-{provider-key}_{slug-of-title}_{year}_{identifier}.sqlite
+{provider-key}_{identifier}.sqlite
 ```
 
-e.g. `wellcome_hand-atlas-of-human-anatomy_1923_b31362138.sqlite`.
+e.g. `wellcome_b31362138.sqlite`, `ia_anatomyofhumanbo1918gray.sqlite`,
+`mdz_bsb00056329.sqlite`.
 
-Including the provider key prevents collisions across providers and makes a
-mixed-provider directory navigable.
+**Deliberately not title-derived.** Earlier versions interpolated a
+slug of the manifest label. Manifest labels vary between editions and
+get corrected over time — this corpus has already had to fix edition
+mislabels — so a title-based filename can drift or actively mislead,
+and two printings of the same work produce confusingly similar names.
+The identifier is stable and round-trips: from `ia_<id>.sqlite` you can
+reconstruct the exact ref that built it. The title is still available
+in `document_metadata` and via `info`.
+
+Including the provider key prevents collisions across providers and
+makes a mixed-provider directory navigable.
+
+Identifier resolution order (`create_index.provider_identifier`):
+
+1. Wellcome b-number found in the manifest URL, including any
+   child-volume suffix (`b22396147_0003`) — without the suffix every
+   volume of a multi-volume Collection would collide.
+2. A provider-supplied `identifier:*` from extra metadata —
+   `gallica_ark`, `heidelberg_diglit`, `bsb`, `lccn`, `ia`.
+3. Fallback: the slugified manifest URL, truncated. Only the `generic`
+   provider should reach this.
 
 ---
 

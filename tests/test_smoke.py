@@ -23,7 +23,7 @@ def test_cli_help_lists_commands():
                  "get-info", "get-page", "get-pages", "get-pdf",
                  "get-figure", "get-region", "get-text", "get-url",
                  "list-figures", "ocr-page", "render-page",
-                 "migrate-index"):
+                 "migrate-index", "get-page-stats"):
         assert cmd in r.output
 
 
@@ -1548,6 +1548,231 @@ def test_migrate_index_rejects_already_migrated(tmp_path):
     r = CliRunner().invoke(cli, ["migrate-index", str(src)])
     assert r.exit_code != 0
     assert "iiif-utils index" in r.output
+
+
+# --- parity gaps: naming, page stats, per-page text, image, refetch ------
+
+def _ref(url, extra=None):
+    from iiif_utils.providers import ManifestRef
+    return ManifestRef(manifest_url=url, provider_key="x",
+                        extra_metadata=extra or {})
+
+
+def test_provider_identifier_prefers_stable_ids_over_title():
+    """Index names key off the identifier, never the manifest label —
+    titles vary between editions and get corrected over time."""
+    from iiif_utils.commands.create_index import provider_identifier
+    # Wellcome b-number straight out of the URL, child suffix preserved
+    assert provider_identifier(_ref(
+        "https://iiif.wellcomecollection.org/presentation/b22396147"
+    )) == "b22396147"
+    assert provider_identifier(_ref(
+        "https://iiif.wellcomecollection.org/presentation/b22396147_0003"
+    )) == "b22396147_0003"
+    # Provider-supplied identifiers
+    assert provider_identifier(_ref(
+        "https://iiif.archive.org/iiif/graybook/manifest.json",
+        {"identifier:ia": "anatomyofhumanbo1918gray"},
+    )) == "anatomyofhumanbo1918gray"
+    assert provider_identifier(_ref(
+        "https://x/y", {"identifier:bsb": "bsb00056329"})) == "bsb00056329"
+    # Fallback: slugified URL, bounded
+    out = provider_identifier(_ref("https://example.org/some/deep/manifest"))
+    assert out and len(out) <= 40
+
+
+def test_parse_leaf_spec_shared():
+    from iiif_utils.utils.page import parse_leaf_spec
+    assert parse_leaf_spec("3") == [3]
+    assert parse_leaf_spec("1-5,10") == [1, 2, 3, 4, 5, 10]
+    assert parse_leaf_spec("1-3,2-4") == [1, 2, 3, 4]
+    assert parse_leaf_spec("8-12", 10) == [8, 9, 10]     # clamped
+    assert parse_leaf_spec("8-12") == [8, 9, 10, 11, 12]  # unbounded
+    assert parse_leaf_spec("") == []
+
+
+def _stats_index(path):
+    import sqlite3 as _sql
+    c = _sql.connect(path)
+    c.execute("CREATE TABLE text_blocks (page_id INT, block_number INT, "
+              "block_type TEXT, bbox_x0 INT, bbox_y0 INT, bbox_x1 INT, "
+              "bbox_y1 INT, text TEXT, line_count INT, word_count INT, "
+              "length INT, avg_confidence FLOAT)")
+    # Three dense prose pages and one sparse plate page
+    for leaf in (0, 1, 2):
+        for b in range(6):
+            c.execute("INSERT INTO text_blocks VALUES "
+                      "(?,?,'ocr_par',0,0,10,10,?,4,20,120,90.0)",
+                      (leaf, b, "word " * 20))
+    c.execute("INSERT INTO text_blocks VALUES "
+              "(3,0,'ocr_par',0,0,10,10,'Fig. 42',1,2,7,60.0)")
+    c.execute("CREATE TABLE page_numbers (leaf_num INTEGER PRIMARY KEY, "
+              "book_page_number TEXT)")
+    for leaf, page in ((0, "1"), (1, "2"), (2, "3"), (3, "4")):
+        c.execute("INSERT INTO page_numbers VALUES (?,?)", (leaf, page))
+    c.commit()
+    c.close()
+
+
+def test_get_page_stats_and_figure_heuristic(tmp_path):
+    import json as _json
+    idx = tmp_path / "stats.sqlite"
+    _stats_index(idx)
+
+    r = CliRunner().invoke(cli, ["get-page-stats", "-i", str(idx),
+                                  "--format", "json"])
+    assert r.exit_code == 0, r.output
+    rows = _json.loads(r.output)
+    assert len(rows) == 4
+    assert rows[0]["blocks"] == 6 and rows[0]["words"] == 120
+    assert rows[0]["page"] == "1"
+
+    # The sparse plate page is the only figure candidate
+    r2 = CliRunner().invoke(cli, ["get-page-stats", "-i", str(idx),
+                                   "--figures", "--format", "json"])
+    assert r2.exit_code == 0, r2.output
+    figs = _json.loads(r2.output)
+    assert [f["leaf"] for f in figs] == [3]
+
+    # Leaf selection
+    r3 = CliRunner().invoke(cli, ["get-page-stats", "-i", str(idx),
+                                   "-l", "1-2", "--format", "json"])
+    assert [f["leaf"] for f in _json.loads(r3.output)] == [1, 2]
+
+
+def test_get_page_stats_rejects_both_selectors(tmp_path):
+    idx = tmp_path / "stats.sqlite"
+    _stats_index(idx)
+    r = CliRunner().invoke(cli, ["get-page-stats", "-i", str(idx),
+                                  "-l", "1", "-b", "2"])
+    assert r.exit_code != 0
+
+
+def test_get_text_per_page_from_index(tmp_path):
+    import json as _json
+    idx = tmp_path / "stats.sqlite"
+    _stats_index(idx)
+    # By leaf, aggregated
+    r = CliRunner().invoke(cli, ["get-text", "-i", str(idx), "-l", "3",
+                                  "--format", "json"])
+    assert r.exit_code == 0, r.output
+    rows = _json.loads(r.output)
+    assert rows[0]["leaf"] == 3 and "Fig. 42" in rows[0]["text"]
+    # By printed page
+    r2 = CliRunner().invoke(cli, ["get-text", "-i", str(idx), "-b", "4",
+                                   "--format", "json"])
+    assert _json.loads(r2.output)[0]["leaf"] == 3
+    # --blocks gives per-block records with bbox + confidence
+    r3 = CliRunner().invoke(cli, ["get-text", "-i", str(idx), "-l", "3",
+                                   "--blocks", "--format", "json"])
+    blk = _json.loads(r3.output)[0]
+    assert blk["block"] == 0 and blk["bbox"] == [0, 0, 10, 10]
+    assert blk["confidence"] == 60.0
+
+
+def test_get_text_per_page_usage_errors(tmp_path):
+    idx = tmp_path / "stats.sqlite"
+    _stats_index(idx)
+    # -l without an index
+    r = CliRunner().invoke(cli, ["get-text", "-l", "3"])
+    assert r.exit_code != 0 and "INDEX" in r.output
+    # --blocks outside per-page mode
+    r2 = CliRunner().invoke(cli, ["get-text", "-i", str(idx), "--blocks"])
+    assert r2.exit_code != 0
+    # both selectors
+    r3 = CliRunner().invoke(cli, ["get-text", "-i", str(idx),
+                                   "-l", "1", "-b", "2"])
+    assert r3.exit_code != 0
+
+
+def test_process_image_autocontrast_and_implication():
+    import io as _io
+    from PIL import Image as _Image
+    from iiif_utils.core.image import process_image, wants_processing
+
+    # A low-contrast scan: all values squeezed into 100-120 rather than
+    # spanning 0-255. Autocontrast should stretch that range back out.
+    img = _Image.new("L", (40, 40), 100)
+    for x in range(40):
+        for y in range(40):
+            img.putpixel((x, y), 100 + (x % 21))
+    src = _io.BytesIO()
+    img.save(src, format="PNG")
+    raw = src.getvalue()
+    assert img.getextrema() == (100, 120)
+
+    assert wants_processing(autocontrast=True, cutoff=None,
+                            preserve_tone=False, quality=None)
+    assert not wants_processing(autocontrast=False, cutoff=None,
+                                 preserve_tone=False, quality=None)
+    # --cutoff alone implies autocontrast (it is meaningless otherwise)
+    assert wants_processing(autocontrast=False, cutoff=5,
+                            preserve_tone=False, quality=None)
+
+    out = process_image(raw, output_format="png", autocontrast=True)
+    assert out != raw
+    stretched = _Image.open(_io.BytesIO(out))
+    assert stretched.size == (40, 40)
+    # The squeezed 100-120 band now spans (nearly) the full range
+    lo, hi = stretched.getextrema()
+    assert hi - lo > 200, f"autocontrast did not stretch: {lo}-{hi}"
+
+
+def test_process_image_jp2_passthrough_and_rgba_flatten():
+    import io as _io
+    from PIL import Image as _Image
+    from iiif_utils.core.image import process_image
+    # JP2 with nothing to do must not be re-encoded (Pillow can't write it)
+    assert process_image(b"\x00fake-jp2", output_format="jp2") == b"\x00fake-jp2"
+    # RGBA → JPEG flattens onto white instead of raising
+    buf = _io.BytesIO()
+    _Image.new("RGBA", (10, 10), (255, 0, 0, 128)).save(buf, format="PNG")
+    out = process_image(buf.getvalue(), output_format="jpg", quality=80)
+    assert _Image.open(_io.BytesIO(out)).mode == "RGB"
+
+
+def test_get_page_exposes_image_processing_flags():
+    r = CliRunner().invoke(cli, ["get-page", "--help"])
+    for flag in ("--autocontrast", "--cutoff", "--preserve-tone",
+                  "--quality"):
+        assert flag in r.output
+
+
+def test_rebuild_index_refetch_guards(tmp_path):
+    """--refetch must refuse rather than wipe text it can't replace."""
+    import sqlite3 as _sql
+    idx = tmp_path / "x.sqlite"
+    c = _sql.connect(idx)
+    c.execute("CREATE TABLE text_blocks (page_id INT, block_number INT, "
+              "text TEXT)")
+    c.commit()
+    c.close()
+    # No index_metadata at all
+    r = CliRunner().invoke(cli, ["rebuild-index", str(idx), "--refetch"])
+    assert r.exit_code != 0 and "migrate-index" in r.output
+
+    c = _sql.connect(idx)
+    c.execute("CREATE TABLE index_metadata (key TEXT PRIMARY KEY, value TEXT)")
+    c.execute("INSERT INTO index_metadata VALUES ('index_mode','image_only')")
+    c.execute("INSERT INTO index_metadata VALUES ('manifest_url','https://x/m')")
+    c.commit()
+    c.close()
+    r2 = CliRunner().invoke(cli, ["rebuild-index", str(idx), "--refetch"])
+    assert r2.exit_code != 0 and "--no-ocr" in r2.output
+
+
+def test_rebuild_index_default_needs_no_network(tmp_path):
+    import sqlite3 as _sql
+    idx = tmp_path / "y.sqlite"
+    c = _sql.connect(idx)
+    c.execute("CREATE TABLE text_blocks (page_id INT, block_number INT, "
+              "text TEXT)")
+    c.execute("INSERT INTO text_blocks VALUES (0,0,'hello world')")
+    c.commit()
+    c.close()
+    r = CliRunner().invoke(cli, ["rebuild-index", str(idx)])
+    assert r.exit_code == 0, r.output
+    assert "FTS rebuilt" in r.output
 
 
 def test_alto_minimal_parse():

@@ -43,26 +43,12 @@ from iiif_utils.core import image_api
 from iiif_utils.core import manifest as manifest_mod
 from iiif_utils.core import mosaic as mosaic_mod
 from iiif_utils.providers import resolve as resolve_ref
+from iiif_utils.utils.page import parse_leaf_spec
 
 
 def _parse_leaf_range(spec: str, max_idx: int) -> list[int]:
     """Parse '1-10', '3', '1-5,10,20-22' into a sorted list of leaf indices."""
-    out: set[int] = set()
-    for part in spec.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        if "-" in part:
-            a, b = part.split("-", 1)
-            lo, hi = int(a), int(b)
-            for i in range(min(lo, hi), max(lo, hi) + 1):
-                if 0 <= i <= max_idx:
-                    out.add(i)
-        else:
-            i = int(part)
-            if 0 <= i <= max_idx:
-                out.add(i)
-    return sorted(out)
+    return parse_leaf_spec(spec, max_idx)
 
 
 def _sample_indices(total: int, n: int) -> list[int]:
