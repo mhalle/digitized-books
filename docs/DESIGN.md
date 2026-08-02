@@ -612,6 +612,86 @@ falling back would invent page numbers for precisely the pages the
 detector declined to number. With this rule, page numbers agree with
 ia-utils on 1402/1402 leaves (Gray) and 563/563 (Charcot).
 
+### 3.8 `page_words` — word geometry and derived reading order
+
+Implements `WORD_GEOMETRY_PLAN.md`. OCR reading order is a lossy
+*rendering*, not data. We retain per-word boxes at index time
+(`page_words(page_id, blob)`) so reading order becomes a derived view:
+a miscoded book is then a wrong rendering, fixable by flipping one
+metadata value, never a corrupted index.
+
+Populated from every source that carries word boxes — hOCR (box +
+`x_wconf` + `x_fsize`), ALTO (box + `WC`), DjVu (box + confidence, no
+font size) — and always-on when geometry exists. Measured on
+`assessedpollscit1965newt`: 1,141 pages / 4.9 MB on a 1,166-leaf
+volume, in line with the plan's 3–4 MB prior.
+
+**Codec divergence from the plan.** The plan's §4 codec is
+geometry-only plus a `tpl` side table for the ~1.5% of lines whose
+token count differs from their box count — a shape that exists because
+in the source deployment the text lives elsewhere and must be re-paired
+at read time. Our blob carries its own tokens instead. That removes
+`tpl` entirely and makes `page_words` impossible to desynchronize from
+`text_blocks` by any later change to block filtering or ordering. The
+token bytes compress to roughly the size of the geometry columns.
+`index_metadata.words_schema` versions the format.
+
+**Layout modes** (`core/layout.py`, surfaced by `render-page`):
+
+| mode | grouping | quotable |
+|---|---|---|
+| `raw` | OCR order, verbatim | yes |
+| `columns` | cluster by x, read each top-to-bottom | no |
+| `table` | cluster by y, read each left-to-right | no |
+
+Reconstructed output is evidence of what is on the page, not a
+transcription — hence `quotable: false` (§3.4 of the plan). FTS stays
+on raw OCR order, so a miscoded layout can never poison search.
+
+Mode selection has three layers of authority: `index_metadata.
+layout_default` (set by `create-index --layout`) → per-call `--layout`
+→ detection **as a labeled hint only**. Detection never selects the
+mode; silent auto-detection is what converts a wrong guess into
+invisible corruption.
+
+**The detector is not calibrated.** §7 requires ~40 labeled pages
+before a confidence number ships, and that exercise has not been run.
+`LayoutHint.calibrated` is therefore `False`, and
+`contradiction_warning` returns None while it is — a warning sourced
+from an unvalidated classifier is worse than none, because acting on
+it means switching to the wrong layout. Known miss: on the poll-book
+fixture (leaf 533, a genuine table) it reports `raw` at 0.67. That is
+defensible at line granularity — hOCR's own `ocr_line` grouping
+already yields correct rows there — but wrong as a page verdict.
+
+Verified against the plan's §7 fixture: `assessedpollscit1965newt`
+leaf 533 in `table` mode reproduces the reference rows exactly —
+`V 15 Smakula, Alexander same Physicist 1900` and `VY 15 Smakula,
+Erika E, same esearch Chem. 1909` — with 58 rows of ≥4 fields. Note
+the leaf is **533**, not the plan's 530: the plan's prototype read
+DjVu positionally, and that item's DjVu is sparse (see below).
+
+### DjVu leaf numbering is not trustworthy
+
+Discovered while validating the above, and worth stating plainly
+because it is a silent-misalignment trap. DjVu `OBJECT` elements carry
+`usemap="{id}_NNNN.djvu"`, a 1-based leaf-file number; we use it
+(minus 1) in preference to sequence position, which is what ia-utils
+used. But neither is universally right:
+
+- `ecturesondiseas00chargoog`: 563 OBJECTs, usemap 1..563, contiguous.
+  DjVu agrees with hOCR and with the canvas count.
+- `assessedpollscit1965newt`: 1,166 OBJECTs, usemap 1..1168 with a gap
+  at 293–294, while its hOCR has 1,170 contiguous pages. The page
+  holding a known record is DjVu leaf 532 but hOCR leaf 533.
+
+No single offset reconciles both, so DjVu leaf numbering is an
+independent sequence from the hOCR page ids the rest of the IA path
+uses. `djvu_alignment_warning` fires whenever the DjVu leaves are
+non-contiguous or the count disagrees with the canvases, rather than
+letting text attach silently to the wrong images. This is a further
+reason DjVu stays a fallback for items with no hOCR at all.
+
 ### HTTP retry & rate-limit handling
 
 `fetch_bytes` and `fetch_many_bytes` retry on 429 + any 5xx (covering

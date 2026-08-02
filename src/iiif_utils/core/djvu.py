@@ -25,12 +25,42 @@ Adapted to lxml.etree.iterparse streaming (the files run to tens of MB).
 """
 from __future__ import annotations
 
+import re
 from io import BytesIO
 from statistics import mean
 
 from lxml import etree  # type: ignore[attr-defined]
 
 from iiif_utils.core.alto import AltoPage, TextBlock
+from iiif_utils.core.wordgeom import PageWords, Word
+
+# `usemap="{identifier}_0533.djvu"` — DjVu's own 1-based leaf-file number.
+_USEMAP_RE = re.compile(r"_(\d+)\.djvu\s*$")
+
+
+def djvu_alignment_warning(pages: list[tuple[int, AltoPage]],
+                            n_canvases: int) -> str | None:
+    """Flag DjVu leaf numbering that can't be trusted against canvases.
+
+    Observed on real items: `assessedpollscit1965newt` has 1166 DjVu
+    OBJECTs numbered 1..1168 (a gap at 293-294) while its hOCR has 1170
+    contiguous pages — so the page holding a known record sits at DjVu
+    leaf 532 but hOCR leaf 533. `ecturesondiseas00chargoog` is
+    contiguous and the two agree. There is no single offset that fixes
+    both, so when the shapes disagree we say so rather than silently
+    attaching text to the wrong images.
+    """
+    if not pages:
+        return None
+    leaves = [leaf for leaf, _ in pages]
+    contiguous = leaves == list(range(leaves[0], leaves[0] + len(leaves)))
+    if contiguous and len(pages) == n_canvases:
+        return None
+    return (f"DjVu leaf numbering is uncorroborated: {len(pages)} OCR "
+            f"pages (leaves {leaves[0]}-{leaves[-1]}"
+            f"{'' if contiguous else ', non-contiguous'}) vs "
+            f"{n_canvases} canvases. Text may be offset against images; "
+            f"prefer an item with hOCR, or spot-check a known page.")
 
 
 def _int_or(value: str | None, default: int = 0) -> int:
@@ -43,10 +73,16 @@ def _int_or(value: str | None, default: int = 0) -> int:
 def parse_djvu_multipage(content: bytes) -> list[tuple[int, AltoPage]]:
     """Parse a whole-book `_djvu.xml` into (leaf, AltoPage) pairs.
 
-    Leaf numbers are assigned by OBJECT sequence order (0-based) —
-    IA emits one OBJECT per leaf, in leaf order (same assumption
-    ia-utils shipped with). Pages with no words are still returned so
-    callers get page dims for every leaf.
+    Leaf numbers come from each OBJECT's `usemap="{id}_NNNN.djvu"`,
+    which is DjVu's own 1-based leaf-file number, converted to our
+    0-based leaf. Sequence position is the fallback when usemap is
+    absent or unparseable (ia-utils used position unconditionally).
+
+    **Leaf alignment here is not guaranteed** — see
+    `djvu_alignment_warning`. DjVu files can be sparse, and DjVu leaf
+    numbering is an independent sequence from the hOCR page ids that
+    the rest of the IA path uses; the two were observed to disagree.
+    This is why DjVu stays a fallback for items with no hOCR at all.
 
     Granularity: one TextBlock per PARAGRAPH, block_type='ocr_par',
     bbox = word-bbox union, avg_confidence = mean of per-word
@@ -55,28 +91,37 @@ def parse_djvu_multipage(content: bytes) -> list[tuple[int, AltoPage]]:
     out: list[tuple[int, AltoPage]] = []
     context = etree.iterparse(BytesIO(content), events=("end",),
                                tag="OBJECT")
-    for leaf, (_event, obj) in enumerate(context):
+    for pos, (_event, obj) in enumerate(context):
+        m = _USEMAP_RE.search(obj.get("usemap") or "")
+        leaf = int(m.group(1)) - 1 if m else pos
         page_w = _int_or(obj.get("width"))
         page_h = _int_or(obj.get("height"))
 
         blocks: list[TextBlock] = []
+        page_words: list[Word] = []
+        words_per_line: list[int] = []
         for para in obj.iter("PARAGRAPH"):
             words: list[str] = []
             confs: list[int] = []
             # bbox union in converted (x0,y0,x1,y1) space
             bx0 = by0 = bx1 = by1 = None
-            for word in para.iter("WORD"):
-                if not word.text:
-                    continue
-                words.append(word.text)
-                conf = word.get("x-confidence")
-                if conf:
-                    try:
-                        confs.append(int(conf))
-                    except ValueError:
-                        pass
-                coords = (word.get("coords") or "").split(",")
-                if len(coords) >= 4:
+            for line_el in para.iter("LINE"):
+                n_in_line = 0
+                for word in line_el.iter("WORD"):
+                    if not word.text:
+                        continue
+                    words.append(word.text)
+                    wconf: int | None = None
+                    conf = word.get("x-confidence")
+                    if conf:
+                        try:
+                            wconf = int(conf)
+                            confs.append(wconf)
+                        except ValueError:
+                            wconf = None
+                    coords = (word.get("coords") or "").split(",")
+                    if len(coords) < 4:
+                        continue
                     try:
                         left, bottom, right, top = (int(c) for c in coords[:4])
                     except ValueError:
@@ -87,6 +132,15 @@ def parse_djvu_multipage(content: bytes) -> list[tuple[int, AltoPage]]:
                     by0 = y0 if by0 is None else min(by0, y0)
                     bx1 = x1 if bx1 is None else max(bx1, x1)
                     by1 = y1 if by1 is None else max(by1, y1)
+                    # DjVu gives coords + confidence but no font size.
+                    page_words.append(Word(
+                        text=word.text, x=x0, y=y0,
+                        w=max(0, x1 - x0), h=max(0, y1 - y0),
+                        conf=wconf, fsize=None,
+                    ))
+                    n_in_line += 1
+                if n_in_line:
+                    words_per_line.append(n_in_line)
 
             text = " ".join(words)
             if not text.strip():
@@ -113,6 +167,9 @@ def parse_djvu_multipage(content: bytes) -> list[tuple[int, AltoPage]]:
             measurement_unit="pixel",
             text_blocks=blocks,
             illustrations=[],
+            words=(PageWords(words=page_words,
+                              words_per_line=words_per_line)
+                   if page_words else None),
         )))
         obj.clear()  # streaming: free the subtree as we go
     return out

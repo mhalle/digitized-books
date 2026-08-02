@@ -39,12 +39,21 @@ from iiif_utils.utils.slug import slugify
                    "index with text_blocks + illustrations empty and "
                    "ocr_source='none'. Use for works where ALTO is broken "
                    "(e.g. Bourgery on Wellcome) or absent (plate atlases).")
+@click.option("--layout", "layout",
+              type=click.Choice(["raw", "columns", "table"]),
+              default="raw", show_default=True,
+              help="Default reading order for this book, stored in "
+                   "index_metadata. 'raw' keeps OCR order (quotable); "
+                   "'columns' unbraids multi-column prose; 'table' "
+                   "reassembles tabular matter into rows. Word geometry "
+                   "is retained regardless, so this can be overridden "
+                   "per-call later without rebuilding.")
 @click.option("--config", "config_path", type=click.Path(path_type=Path),
               default=None)
 @click.pass_context
 def create_index(ctx: click.Context, ref: str, output_dir: Path,
                   output_path: Path | None, provider: str | None,
-                  allow_empty: bool, no_ocr: bool,
+                  allow_empty: bool, no_ocr: bool, layout: str,
                   config_path: Path | None) -> None:
     """Build a SQLite index for a IIIF manifest."""
     verbose = bool(ctx.obj.get("verbose")) if ctx.obj else False
@@ -176,6 +185,7 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
     tb_rows: list[dict[str, Any]] = []
     il_rows: list[dict[str, Any]] = []
     image_dims: dict[int, tuple[int, int]] = {}
+    pw_rows: list[dict[str, Any]] = []
     mono_source: str | None = None
     if no_ocr:
         n_alto_canvases = n_hocr_canvases = n_text_canvases = 0
@@ -192,7 +202,7 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
             if not c.alto_url and not c.hocr_url and c.text_url
         )
         if canvases:
-            tb_rows, il_rows, image_dims = _parse_altos(
+            tb_rows, il_rows, image_dims, pw_rows = _parse_altos(
                 canvases, cfg_http=cfg_http, cache_dir=cache_dir, log=log,
             )
         if canvases and not tb_rows:
@@ -204,7 +214,7 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
                 cfg_http=cfg_http, cache_dir=cache_dir, log=log,
             )
             if mono is not None:
-                tb_rows, image_dims, mono_source = mono
+                tb_rows, image_dims, mono_source, pw_rows = mono
 
     # --- index_metadata (after parse so we know the OCR provenance) --------
     from iiif_utils import __version__
@@ -229,7 +239,11 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
         "manifest_url": ref_obj.manifest_url,
         "presentation_api_version": manifest_mod.presentation_version(manifest),
         "iiif_utils_version": __version__,
+        "layout_default": layout,
     }
+    if pw_rows:
+        from iiif_utils.core.wordgeom import WORDS_SCHEMA
+        idx_md["words_schema"] = WORDS_SCHEMA
     if mono_source:
         # Whole-book OCR file (IA shape) rather than per-canvas seeAlso.
         idx_md["ocr_shape"] = "monolithic"
@@ -295,6 +309,8 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
         db_mod.write_text_blocks(db, tb_rows)
     if il_rows:
         db_mod.write_illustrations(db, il_rows)
+    if pw_rows:
+        db_mod.write_page_words(db, pw_rows)
 
     # --- ranges ------------------------------------------------------------
     range_entries = manifest_mod.ranges(manifest)
@@ -336,13 +352,19 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
     click.echo(f"  canvases:      {n_pages}")
     click.echo(f"  text_blocks:   {n_blocks:,}")
     click.echo(f"  illustrations: {n_illus:,}")
+    if pw_rows:
+        n_words = sum(1 for _ in pw_rows)
+        blob_kb = sum(len(r["blob"]) for r in pw_rows) / 1024
+        click.echo(f"  page_words:    {n_words:,} pages "
+                   f"({blob_kb:.0f} KB, layout_default={layout})")
 
 
 def _parse_altos(canvases: list[Any], *, cfg_http: dict[str, Any],
                   cache_dir: Path, log: Logger,
                   ) -> tuple[list[dict[str, Any]],
                              list[dict[str, Any]],
-                             dict[int, tuple[int, int]]]:
+                             dict[int, tuple[int, int]],
+                             list[dict[str, Any]]]:
     """Fetch + parse per-canvas OCR.
 
     Three sources, in priority order:
@@ -356,6 +378,7 @@ def _parse_altos(canvases: list[Any], *, cfg_http: dict[str, Any],
     image_dims: dict[int, tuple[int, int]] = {}
     tb_rows: list[dict[str, Any]] = []
     il_rows: list[dict[str, Any]] = []
+    pw_rows: list[dict[str, Any]] = []
 
     alto_dir = cache_dir / "alto"
     hocr_dir = cache_dir / "hocr"
@@ -376,7 +399,7 @@ def _parse_altos(canvases: list[Any], *, cfg_http: dict[str, Any],
              f"(of {len(canvases)} canvases)")
     if (not alto_canvases and not hocr_only_canvases
             and not text_only_canvases):
-        return tb_rows, il_rows, image_dims
+        return tb_rows, il_rows, image_dims, pw_rows
 
     def _ingest_xml_blocks(c: Any, page: Any, kind: str) -> None:
         _rows_from_page(
@@ -384,6 +407,7 @@ def _parse_altos(canvases: list[Any], *, cfg_http: dict[str, Any],
             default_block_type=("ocr_textblock" if kind == "alto"
                                  else "ocrx_block"),
             tb_rows=tb_rows, il_rows=il_rows, image_dims=image_dims,
+            pw_rows=pw_rows,
         )
 
     # --- ALTO branch -------------------------------------------------------
@@ -468,13 +492,14 @@ def _parse_altos(canvases: list[Any], *, cfg_http: dict[str, Any],
             })
         log.info(f"ingested {n_text} plain-text fallbacks")
 
-    return tb_rows, il_rows, image_dims
+    return tb_rows, il_rows, image_dims, pw_rows
 
 
 def _rows_from_page(page_index: int, page: Any, *, default_block_type: str,
                      tb_rows: list[dict[str, Any]],
                      il_rows: list[dict[str, Any]],
-                     image_dims: dict[int, tuple[int, int]]) -> None:
+                     image_dims: dict[int, tuple[int, int]],
+                     pw_rows: list[dict[str, Any]] | None = None) -> None:
     """Convert one parsed AltoPage into text_blocks / illustrations rows.
 
     Shared by the per-canvas branches (_parse_altos) and the monolithic
@@ -484,6 +509,14 @@ def _rows_from_page(page_index: int, page: Any, *, default_block_type: str,
     """
     if page.page_w and page.page_h:
         image_dims[page_index] = (page.page_w, page.page_h)
+    # Word geometry: always retained when the source carries it, so a
+    # miscoded layout is a wrong rendering rather than a lost index.
+    if pw_rows is not None and getattr(page, "words", None):
+        from iiif_utils.core import wordgeom
+        pw_rows.append({
+            "page_id": page_index,
+            "blob": wordgeom.encode(page.words),
+        })
     for b in page.text_blocks:
         tb_rows.append({
             "page_id": page_index,
@@ -547,7 +580,8 @@ def _fetch_page_number_overrides(
 def _parse_monolithic_ocr(
     extra_metadata: dict[str, str], canvases: list[Any], *,
     cfg_http: dict[str, Any], cache_dir: Path, log: Logger,
-) -> tuple[list[dict[str, Any]], dict[int, tuple[int, int]], str] | None:
+) -> tuple[list[dict[str, Any]], dict[int, tuple[int, int]], str,
+             list[dict[str, Any]]] | None:
     """Whole-book OCR fallback for providers with no per-canvas OCR.
 
     IA publishes OCR as monolithic derivatives — one `{id}_hocr.html`
@@ -591,6 +625,9 @@ def _parse_monolithic_ocr(
                                           suffix=".djvu.xml")
             pages = djvu_mod.parse_djvu_multipage(content)
             source = "djvu"
+            warn = djvu_mod.djvu_alignment_warning(pages, len(canvases))
+            if warn:
+                log.warn(warn)
         except Exception as e:
             log.warn(f"DjVu XML failed ({e})")
             pages = None
@@ -600,6 +637,7 @@ def _parse_monolithic_ocr(
     valid = {c.index for c in canvases}
     tb_rows: list[dict[str, Any]] = []
     il_rows: list[dict[str, Any]] = []  # always empty for hOCR/DjVu
+    pw_rows: list[dict[str, Any]] = []
     image_dims: dict[int, tuple[int, int]] = {}
     dropped = 0
     for leaf, page in pages:
@@ -608,11 +646,11 @@ def _parse_monolithic_ocr(
             continue
         _rows_from_page(leaf, page, default_block_type="ocr_par",
                          tb_rows=tb_rows, il_rows=il_rows,
-                         image_dims=image_dims)
+                         image_dims=image_dims, pw_rows=pw_rows)
     if len(pages) != len(canvases):
         log.warn(f"monolithic {source}: {len(pages)} OCR pages vs "
                  f"{len(canvases)} canvases"
                  + (f"; {dropped} pages outside canvas range dropped"
                     if dropped else ""))
     log.info(f"parsed {len(pages) - dropped} pages from monolithic {source}")
-    return tb_rows, image_dims, source
+    return tb_rows, image_dims, source, pw_rows

@@ -97,6 +97,10 @@ def _page_from_el(page_el: Any, block_classes: tuple[str, ...],
 
     block_els = page_el.xpath(_class_xpath(block_classes))
 
+    from iiif_utils.core.wordgeom import PageWords, Word
+    page_words: list[Word] = []
+    words_per_line: list[int] = []
+
     text_blocks: list[TextBlock] = []
     for bn, block in enumerate(block_els):
         title = block.get("title") or ""
@@ -132,6 +136,35 @@ def _page_from_el(page_el: Any, block_classes: tuple[str, ...],
         )
         avg_conf = mean(confs) if (keep_confidence and confs) else None
 
+        # Word geometry, walked per line in the same order as the block
+        # text above. x_fsize is retained because it makes heading
+        # detection structural rather than regex-based (§3.6).
+        for line_el in line_els:
+            n_in_line = 0
+            for w in line_el.xpath(
+                "descendant::*[contains(concat(' ', normalize-space(@class),"
+                " ' '), ' ocrx_word ')]"
+            ):
+                t = _word_text(w)
+                if not t:
+                    continue
+                wbox = _parse_bbox(w.get("title") or "")
+                if wbox is None:
+                    continue
+                wx0, wy0, wx1, wy1 = wbox
+                wt = w.get("title") or ""
+                mc = _WCONF_RE.search(wt)
+                mf = _FSIZE_RE.search(wt)
+                page_words.append(Word(
+                    text=t, x=wx0, y=wy0,
+                    w=max(0, wx1 - wx0), h=max(0, wy1 - wy0),
+                    conf=int(mc.group(1)) if mc else None,
+                    fsize=int(mf.group(1)) if mf else None,
+                ))
+                n_in_line += 1
+            if n_in_line:
+                words_per_line.append(n_in_line)
+
         text_blocks.append(TextBlock(
             block_number=bn,
             alto_id=block.get("id") or None,
@@ -151,6 +184,9 @@ def _page_from_el(page_el: Any, block_classes: tuple[str, ...],
         measurement_unit="pixel",  # hOCR bboxes are always image pixels
         text_blocks=text_blocks,
         illustrations=illustrations,
+        words=(PageWords(words=page_words,
+                          words_per_line=words_per_line)
+               if page_words else None),
     )
 
 

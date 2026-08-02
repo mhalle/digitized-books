@@ -6,8 +6,12 @@ See docs/DESIGN.md §3.5 for the schema mapping rationale.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from lxml import etree  # type: ignore[attr-defined]
+
+if TYPE_CHECKING:  # avoid a cycle: wordgeom is standalone, alto is not
+    from iiif_utils.core.wordgeom import PageWords
 
 # Wellcome serves ALTO v2 (despite the manifest seeAlso advertising ALTO v3).
 # The namespace MUST match what's in the document.
@@ -53,6 +57,11 @@ class AltoPage:
     measurement_unit: str | None
     text_blocks: list[TextBlock]
     illustrations: list[Illustration]
+    # Word-level geometry (WORD_GEOMETRY_PLAN). Populated whenever the
+    # source carries per-word boxes; empty when it doesn't (plain-text
+    # fallbacks). Retained at index time so reading order can stay a
+    # derived view rather than being frozen into the index.
+    words: "PageWords | None" = None
 
 
 def _ns_of(root: etree._Element) -> str:
@@ -104,6 +113,10 @@ def _parse(root: etree._Element) -> AltoPage:
     mu_el = root.find(".//a:MeasurementUnit", nsm)
     munit = mu_el.text if mu_el is not None else None
 
+    from iiif_utils.core.wordgeom import PageWords, Word
+    words: list[Word] = []
+    words_per_line: list[int] = []
+
     text_blocks: list[TextBlock] = []
     for bn, b in enumerate(root.findall(".//a:TextBlock", nsm)):
         try:
@@ -116,6 +129,33 @@ def _parse(root: etree._Element) -> AltoPage:
         text = _block_text(b, nsm)
         lines = b.findall("a:TextLine", nsm)
         strings = b.findall(".//a:String", nsm)
+        # Word geometry, walked in the same order as the text above so
+        # renderings and text_blocks describe the same page.
+        for line in lines:
+            n_in_line = 0
+            for s in line.findall("a:String", nsm):
+                content = s.get("CONTENT")
+                if not content:
+                    continue
+                try:
+                    wx = int(s.get("HPOS", 0))
+                    wy = int(s.get("VPOS", 0))
+                    ww = int(s.get("WIDTH", 0))
+                    wh = int(s.get("HEIGHT", 0))
+                except (TypeError, ValueError):
+                    continue
+                wc = s.get("WC")   # ALTO word confidence: 0.0-1.0
+                conf: int | None = None
+                if wc is not None:
+                    try:
+                        conf = max(0, min(100, round(float(wc) * 100)))
+                    except ValueError:
+                        conf = None
+                words.append(Word(text=content, x=wx, y=wy, w=ww, h=wh,
+                                   conf=conf, fsize=None))
+                n_in_line += 1
+            if n_in_line:
+                words_per_line.append(n_in_line)
         text_blocks.append(TextBlock(
             block_number=bn,
             alto_id=b.get("ID"),
@@ -157,4 +197,6 @@ def _parse(root: etree._Element) -> AltoPage:
         measurement_unit=munit,
         text_blocks=text_blocks,
         illustrations=illustrations,
+        words=(PageWords(words=words, words_per_line=words_per_line)
+               if words else None),
     )

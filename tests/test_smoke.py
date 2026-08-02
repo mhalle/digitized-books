@@ -22,7 +22,7 @@ def test_cli_help_lists_commands():
                  "search-catalog", "search-cat", "search-index",
                  "get-info", "get-page", "get-pages", "get-pdf",
                  "get-figure", "get-region", "get-text", "get-url",
-                 "list-figures", "ocr-page"):
+                 "list-figures", "ocr-page", "render-page"):
         assert cmd in r.output
 
 
@@ -1019,6 +1019,42 @@ def test_djvu_multipage_parse_and_axis_conversion():
     assert pages[1][1].text_blocks == []
 
 
+def test_djvu_leaf_from_usemap_not_position():
+    """usemap is DjVu's own leaf-file number; position drifts when sparse."""
+    from iiif_utils.core.djvu import parse_djvu_multipage
+    sample = b"""<?xml version="1.0"?><DjVuXML><BODY>
+    <OBJECT usemap="x_0001.djvu" width="100" height="200"></OBJECT>
+    <OBJECT usemap="x_0004.djvu" width="100" height="200"></OBJECT>
+    </BODY></DjVuXML>"""
+    pages = parse_djvu_multipage(sample)
+    # usemap is 1-based → 0-based leaves 0 and 3, NOT positions 0 and 1
+    assert [leaf for leaf, _ in pages] == [0, 3]
+
+
+def test_djvu_leaf_falls_back_to_position_without_usemap():
+    from iiif_utils.core.djvu import parse_djvu_multipage
+    assert [leaf for leaf, _ in parse_djvu_multipage(MONO_DJVU)] == [0, 1]
+
+
+def test_djvu_alignment_warning():
+    """Sparse or short DjVu can't be trusted against canvases."""
+    from iiif_utils.core.alto import AltoPage
+    from iiif_utils.core.djvu import djvu_alignment_warning
+
+    def pg(leaf):
+        return (leaf, AltoPage(0, 0, "pixel", [], []))
+
+    # Contiguous and matching the canvas count → no warning
+    assert djvu_alignment_warning([pg(0), pg(1), pg(2)], 3) is None
+    # Non-contiguous (the poll-book shape) → warn
+    w = djvu_alignment_warning([pg(0), pg(1), pg(3)], 3)
+    assert w is not None and "non-contiguous" in w
+    # Count mismatch (leaves DjVu never saw) → warn
+    w2 = djvu_alignment_warning([pg(0), pg(1)], 5)
+    assert w2 is not None and "5 canvases" in w2
+    assert djvu_alignment_warning([], 3) is None
+
+
 def _fake_canvas(index):
     from iiif_utils.core.manifest import Canvas
     return Canvas(index=index, canvas_id=f"c{index}", label=None,
@@ -1039,7 +1075,7 @@ def test_monolithic_ocr_branch_hocr(monkeypatch, tmp_path):
         canvases, cfg_http={}, cache_dir=tmp_path, log=Logger(verbose=False),
     )
     assert out is not None
-    tb_rows, image_dims, source = out
+    tb_rows, image_dims, source, pw_rows = out
     assert source == "hocr"
     assert image_dims[0] == (1000, 1500)
     assert [r["page_id"] for r in tb_rows] == [0, 1]
@@ -1061,7 +1097,7 @@ def test_monolithic_ocr_branch_djvu_fallback(monkeypatch, tmp_path):
         canvases, cfg_http={}, cache_dir=tmp_path, log=Logger(verbose=False),
     )
     assert out is not None
-    tb_rows, image_dims, source = out
+    tb_rows, image_dims, source, pw_rows = out
     assert source == "djvu"
     assert len(tb_rows) == 1
     assert tb_rows[0]["text"] == "Smakula, Alexander"
@@ -1090,8 +1126,273 @@ def test_monolithic_ocr_drops_out_of_range_leaves(monkeypatch, tmp_path):
         canvases, cfg_http={}, cache_dir=tmp_path, log=Logger(verbose=False),
     )
     assert out is not None
-    tb_rows, _dims, _source = out
+    tb_rows, _dims, _source, _pw = out
     assert [r["page_id"] for r in tb_rows] == [0]
+
+
+# --- WORD_GEOMETRY_PLAN: codec, layout modes, detection ------------------
+
+def _w(text, x, y, w=40, h=30, conf=None, fsize=None):
+    from iiif_utils.core.wordgeom import Word
+    return Word(text=text, x=x, y=y, w=w, h=h, conf=conf, fsize=fsize)
+
+
+def test_wordgeom_roundtrip():
+    from iiif_utils.core.wordgeom import PageWords, decode, encode
+    page = PageWords(
+        words=[_w("Smakula,", 278, 993, 159, 36, conf=90, fsize=12),
+               _w("Alexander", 450, 993, 150, 36, conf=80),
+               _w("same", 700, 993, 90, 36)],
+        words_per_line=[3],
+    )
+    out = decode(encode(page))
+    assert [x.text for x in out.words] == ["Smakula,", "Alexander", "same"]
+    assert (out.words[0].x, out.words[0].y) == (278, 993)
+    assert (out.words[0].w, out.words[0].h) == (159, 36)
+    assert out.words[0].conf == 90 and out.words[0].fsize == 12
+    # None survives the sentinel round-trip, and isn't confused with 0
+    assert out.words[1].fsize is None
+    assert out.words[2].conf is None and out.words[2].fsize is None
+    assert out.words_per_line == [3]
+    assert len(out.lines()) == 1 and len(out.lines()[0]) == 3
+
+
+def test_wordgeom_unicode_and_empty():
+    from iiif_utils.core.wordgeom import PageWords, decode, encode
+    page = PageWords(words=[_w("œuvre", 10, 10), _w("größer", 60, 10)],
+                      words_per_line=[2])
+    assert [x.text for x in decode(encode(page)).words] == ["œuvre", "größer"]
+    empty = decode(encode(PageWords()))
+    assert empty.words == [] and empty.words_per_line == []
+
+
+def test_wordgeom_rejects_garbage():
+    import pytest
+    from iiif_utils.core.wordgeom import decode
+    with pytest.raises(ValueError):
+        decode(b"not zlib at all")
+
+
+def test_wordgeom_clamps_out_of_range_coords():
+    """Coords beyond uint16 are clamped, never silently wrapped."""
+    from iiif_utils.core.wordgeom import PageWords, decode, encode
+    page = PageWords(words=[_w("x", 70000, -5, 40, 30)], words_per_line=[1])
+    out = decode(encode(page))
+    assert out.words[0].x == 65535
+    assert out.words[0].y == 0
+
+
+def _poll_book_page():
+    """A poll-book style table: OCR columnized it into vertical stacks.
+
+    Two records across four columns. In OCR (document) order the words
+    arrive column-by-column — every house number, then every name — which
+    is exactly the failure WORD_GEOMETRY_PLAN §1 describes.
+    """
+    from iiif_utils.core.wordgeom import PageWords
+    rows_y = [1000, 1060]
+    cols = [("15", 100), ("Smakula,", 300), ("same", 700), ("Physicist", 900)]
+    cols2 = [("15", 100), ("Smakula,", 300), ("same", 700), ("Chem.", 900)]
+    words = []
+    per_line = []
+    # column-major emission: for each column, both rows' cells
+    for i in range(4):
+        for r, y in enumerate(rows_y):
+            text, x = (cols if r == 0 else cols2)[i]
+            words.append(_w(text, x, y, w=len(text) * 18, h=38))
+            per_line.append(1)          # one token per line: the stack
+    return PageWords(words=words, words_per_line=per_line)
+
+
+def test_table_mode_reassembles_rows_from_columnized_ocr():
+    """§7 fixture shape: the Smakula record must come back as one row."""
+    from iiif_utils.core.layout import render_table
+    out = render_table(_poll_book_page())
+    assert out.layout == "table"
+    assert out.quotable is False      # §3.4 — reconstructed, not transcribed
+    assert out.lines[0] == "15 Smakula, same Physicist"
+    assert out.lines[1] == "15 Smakula, same Chem."
+
+
+def test_table_mode_survives_skew():
+    """§7 regression: a synthetic slope must not fragment rows.
+
+    The field report's ±22px failure was skew, not noise — deskew runs
+    before clustering, so the rows still come back whole.
+    """
+    from iiif_utils.core.layout import render_table
+    page = _poll_book_page()
+    from iiif_utils.core.wordgeom import PageWords, Word
+    slope = 0.02                       # ~1.1 degrees
+    skewed = PageWords(
+        words=[Word(text=wd.text, x=wd.x,
+                     y=int(wd.y + slope * (wd.x + wd.w / 2)),
+                     w=wd.w, h=wd.h, conf=wd.conf, fsize=wd.fsize)
+               for wd in page.words],
+        words_per_line=page.words_per_line,
+    )
+    out = render_table(skewed)
+    assert out.lines[0] == "15 Smakula, same Physicist"
+    assert out.lines[1] == "15 Smakula, same Chem."
+
+
+def test_row_tolerance_self_calibrates():
+    """§5: tolerance ≈ 0.7 × median word height, with a floor."""
+    from iiif_utils.core.layout import row_tolerance
+    words = [_w("a", 0, 0, h=38) for _ in range(5)]
+    assert abs(row_tolerance(words) - 0.7 * 38) < 0.01
+    tiny = [_w("a", 0, 0, h=2) for _ in range(5)]
+    assert row_tolerance(tiny) == 6.0      # floor
+
+
+def test_estimate_skew_recovers_known_slope():
+    from iiif_utils.core.layout import estimate_skew
+    slope = 0.02
+    words = [_w("w", x, int(100 + slope * x), w=40, h=30)
+             for x in range(0, 1200, 60)]
+    assert abs(estimate_skew(words) - slope) < 0.005
+
+
+def _braided_page():
+    """Two-column prose that OCR braided: each line spans both columns."""
+    from iiif_utils.core.wordgeom import PageWords
+    words, per_line = [], []
+    left = [["The", "patient", "was"], ["seen", "again", "in"]]
+    right = [["Fever", "abated", "on"], ["the", "third", "day"]]
+    for lrow, rrow in zip(left, right):
+        n = 0
+        for i, t in enumerate(lrow):
+            words.append(_w(t, 100 + i * 120, 500 + 60 * len(per_line), w=100))
+            n += 1
+        for i, t in enumerate(rrow):
+            words.append(_w(t, 900 + i * 120, 500 + 60 * len(per_line), w=100))
+            n += 1
+        per_line.append(n)
+    return PageWords(words=words, words_per_line=per_line)
+
+
+def test_columns_mode_unbraids_and_table_is_not_applied():
+    from iiif_utils.core.layout import render_columns, render_raw
+    page = _braided_page()
+    # Raw keeps the braid — and is the only quotable rendering
+    raw = render_raw(page)
+    assert raw.quotable is True
+    assert raw.lines[0] == "The patient was Fever abated on"
+    # Columns splits at the gutter: left column first, then right
+    out = render_columns(page, page_width=2000)
+    assert out.quotable is False
+    assert out.lines[:2] == ["The patient was", "seen again in"]
+    assert out.lines[2:] == ["Fever abated on", "the third day"]
+
+
+def test_columns_mode_never_splits_without_a_gutter():
+    """No-regression rule (§5 columns 3): unsplittable stays braided."""
+    from iiif_utils.core.layout import render_columns
+    from iiif_utils.core.wordgeom import PageWords
+    page = PageWords(
+        words=[_w(t, 100 + i * 110, 500, w=100)
+               for i, t in enumerate(["one", "two", "three", "four"])],
+        words_per_line=[4],
+    )
+    out = render_columns(page, page_width=2000)
+    assert out.lines == ["one two three four"]
+
+
+def test_render_dispatch_and_unknown_layout():
+    import pytest
+    from iiif_utils.core.layout import render
+    page = _braided_page()
+    assert render(page, "raw").quotable is True
+    assert render(page, "table").layout == "table"
+    assert render(page, "columns", page_width=2000).layout == "columns"
+    with pytest.raises(ValueError):
+        render(page, "diagonal")
+
+
+def test_detect_is_a_hint_with_signals():
+    from iiif_utils.core.layout import detect
+    hint = detect(_poll_book_page())
+    assert hint.layout_hint == "table"
+    assert 0.0 <= hint.confidence <= 1.0
+    # Signals are reported so a human can audit the call (§5 detect)
+    assert "left_edge_peaks" in hint.signals
+    assert "stacked_frac" in hint.signals
+    assert "width_cv" in hint.signals
+
+
+def test_detect_never_auto_applies():
+    """Configuration wins; contradiction is surfaced, not acted on (§3.3)."""
+    import dataclasses
+    from iiif_utils.core.layout import contradiction_warning, detect
+    hint = detect(_poll_book_page())
+    # §7: while the detector is uncalibrated it must stay silent — a
+    # warning from an unvalidated classifier pushes users to the wrong
+    # layout, the very failure this feature prevents.
+    assert hint.calibrated is False
+    assert contradiction_warning("columns", hint) is None
+
+    # Once calibrated, a confident disagreement IS surfaced.
+    calibrated = dataclasses.replace(hint, calibrated=True)
+    warn = contradiction_warning("columns", calibrated)
+    assert warn is not None and "configured" in warn
+    assert "table" in warn
+    # Agreement still produces no noise
+    assert contradiction_warning("table", calibrated) is None
+
+
+def test_hocr_parser_retains_word_geometry():
+    from iiif_utils.core.hocr import parse_hocr_multipage
+    pages = parse_hocr_multipage(MONO_HOCR)
+    words = pages[0][1].words
+    assert words is not None
+    assert [wd.text for wd in words.words] == ["hello", "world"]
+    assert (words.words[0].x, words.words[0].y) == (10, 20)
+    assert words.words[0].w == 40 and words.words[0].h == 40
+    assert words.words[0].conf == 95
+    assert words.words_per_line == [2]
+
+
+def test_djvu_parser_retains_word_geometry_with_converted_axis():
+    from iiif_utils.core.djvu import parse_djvu_multipage
+    pages = parse_djvu_multipage(MONO_DJVU)
+    words = pages[0][1].words
+    assert words is not None
+    assert [wd.text for wd in words.words] == ["Smakula,", "Alexander"]
+    # coords="278,1029,437,993" → x=278, y=993 (top), h=36
+    assert (words.words[0].x, words.words[0].y) == (278, 993)
+    assert words.words[0].h == 36
+    assert words.words[0].conf == 90
+    assert words.words[0].fsize is None     # DjVu has no font size
+    assert words.words_per_line == [2]
+
+
+def test_alto_parser_retains_word_geometry():
+    page = alto.parse_alto_bytes(MINIMAL_ALTO)
+    assert page.words is not None
+    assert [wd.text for wd in page.words.words] == ["hello", "world"]
+    assert (page.words.words[0].x, page.words.words[0].y) == (10, 20)
+    assert page.words.words_per_line == [2]
+
+
+def test_page_words_rows_written_by_ingest():
+    """_rows_from_page emits a page_words row whenever geometry exists."""
+    from iiif_utils.commands.create_index import _rows_from_page
+    from iiif_utils.core.hocr import parse_hocr_multipage
+    from iiif_utils.core.wordgeom import decode
+    _leaf, page = parse_hocr_multipage(MONO_HOCR)[0]
+    tb, il, dims, pw = [], [], {}, []
+    _rows_from_page(0, page, default_block_type="ocr_par", tb_rows=tb,
+                     il_rows=il, image_dims=dims, pw_rows=pw)
+    assert len(pw) == 1 and pw[0]["page_id"] == 0
+    assert [wd.text for wd in decode(pw[0]["blob"]).words] == ["hello", "world"]
+
+
+def test_create_index_exposes_layout_flag():
+    r = CliRunner().invoke(cli, ["create-index", "--help"])
+    assert r.exit_code == 0
+    assert "--layout" in r.output
+    for mode in ("raw", "columns", "table"):
+        assert mode in r.output
 
 
 def test_alto_minimal_parse():
