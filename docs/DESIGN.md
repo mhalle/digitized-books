@@ -717,6 +717,31 @@ for books you only need to search; verified against a real ia-utils
 index with 16/16 sampled leaves textually identical to a freshly-built
 one.
 
+### Addressing a page: leaves vs printed pages
+
+Every page-addressing command takes the same two flags: `-l/--leaf`
+(0-based canvas index) and `-b/--book` (the printed page number). They
+are not interchangeable, and the distinction is load-bearing.
+
+**Leaves are integers; printed pages are TEXT.** A book's printed
+numbering includes roman front matter (`xii`), plate suffixes (`12a`)
+and folio forms, so `-b` accepts arbitrary labels. `parse_book_spec`
+expands a token like `100-150` only when both ends are numeric and
+otherwise treats it as a literal label; `parse_leaf_spec` is
+integer-only and, given `xii`, says so and points at `-b`.
+
+**A printed page number is not unique.** Plates repeat numbers, volumes
+bound together restart at 1, and the OCR page-number detector misreads.
+When several leaves carry the same printed page, `resolve_leaf` refuses
+and names the candidates rather than returning whichever row SQLite
+ordered first — silently picking one is how a figure gets cropped from
+the wrong page and nobody notices. Disambiguate with `-l`.
+
+Terminology note: the CLI says *leaf* while the outline schema says
+*canvas* (`canvas_start` / `canvas_end`) and `search-index` /
+`list-figures` emit a `canvas` key. These are the same number — the IA
+and IIIF names for it respectively.
+
 ### HTTP retry & rate-limit handling
 
 `fetch_bytes` and `fetch_many_bytes` retry on 429 + any 5xx (covering

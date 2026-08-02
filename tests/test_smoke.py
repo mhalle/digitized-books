@@ -1775,6 +1775,95 @@ def test_rebuild_index_default_needs_no_network(tmp_path):
     assert "FTS rebuilt" in r.output
 
 
+def _addressing_index(path):
+    """Index exercising the hard page-addressing cases: roman front
+    matter, a plate label, and two leaves claiming the same page."""
+    import sqlite3 as _sql
+    c = _sql.connect(path)
+    c.execute("CREATE TABLE text_blocks (page_id INT, block_number INT, "
+              "block_type TEXT, bbox_x0 INT, bbox_y0 INT, bbox_x1 INT, "
+              "bbox_y1 INT, text TEXT, line_count INT, word_count INT, "
+              "length INT, avg_confidence FLOAT)")
+    c.execute("CREATE TABLE page_numbers (leaf_num INTEGER PRIMARY KEY, "
+              "book_page_number TEXT)")
+    for leaf, page in ((0, "i"), (1, "ii"), (2, "xii"), (3, "1"),
+                        (4, "2"), (5, "1"), (6, "12a")):
+        c.execute("INSERT INTO page_numbers VALUES (?,?)", (leaf, page))
+        c.execute("INSERT INTO text_blocks VALUES "
+                  "(?,0,'ocr_par',0,0,9,9,?,1,3,12,90.0)",
+                  (leaf, f"text of leaf {leaf}"))
+    c.commit()
+    c.close()
+
+
+def test_parse_book_spec_handles_non_numeric_labels():
+    """Printed pages are TEXT: roman front matter, plate suffixes."""
+    from iiif_utils.utils.page import parse_book_spec
+    assert parse_book_spec("xii") == ["xii"]
+    assert parse_book_spec("12a") == ["12a"]
+    assert parse_book_spec("i,ii,xii") == ["i", "ii", "xii"]
+    # Numeric ranges still expand
+    assert parse_book_spec("100-103") == ["100", "101", "102", "103"]
+    assert parse_book_spec("5,7-9") == ["5", "7", "8", "9"]
+    # Mixed: range expands, label passes through
+    assert parse_book_spec("1-2,xii") == ["1", "2", "xii"]
+    # A hyphenated non-numeric token is a label, not a range
+    assert parse_book_spec("A-1") == ["A-1"]
+    assert parse_book_spec("") == []
+
+
+def test_book_addressing_accepts_roman_numerals(tmp_path):
+    """Regression: -b xii used to crash with a raw ValueError."""
+    import json as _json
+    idx = tmp_path / "addr.sqlite"
+    _addressing_index(idx)
+    r = CliRunner().invoke(cli, ["get-text", "-i", str(idx), "-b", "xii",
+                                  "--format", "json"])
+    assert r.exit_code == 0, r.output
+    assert _json.loads(r.output)[0]["leaf"] == 2
+    r2 = CliRunner().invoke(cli, ["get-page-stats", "-i", str(idx),
+                                   "-b", "i,12a", "--format", "json"])
+    assert r2.exit_code == 0, r2.output
+    assert [x["leaf"] for x in _json.loads(r2.output)] == [0, 6]
+
+
+def test_leaf_spec_rejects_non_numeric_with_guidance(tmp_path):
+    idx = tmp_path / "addr.sqlite"
+    _addressing_index(idx)
+    r = CliRunner().invoke(cli, ["get-text", "-i", str(idx), "-l", "xii"])
+    assert r.exit_code != 0
+    assert "not a leaf number" in r.output and "--book" in r.output
+
+
+def test_ambiguous_printed_page_refuses(tmp_path):
+    """Two leaves carrying page '1' must not silently resolve to one."""
+    import sqlite3 as _sql
+    import pytest as _pt
+    from iiif_utils.utils.page import resolve_leaf
+    idx = tmp_path / "addr.sqlite"
+    _addressing_index(idx)
+    conn = _sql.connect(idx)
+    conn.row_factory = _sql.Row
+    # Unambiguous pages still resolve
+    assert resolve_leaf(conn, None, "xii") == 2
+    assert resolve_leaf(conn, None, "2") == 4
+    # Explicit leaf always wins
+    assert resolve_leaf(conn, 5, None) == 5
+    with _pt.raises(click.ClickException) as exc:
+        resolve_leaf(conn, None, "1")
+    msg = str(exc.value)
+    assert "ambiguous" in msg and "3, 5" in msg and "--leaf" in msg
+
+
+def test_leaf_book_flags_are_consistent_across_commands():
+    """Every page-addressing command uses -l/--leaf and -b/--book."""
+    for cmd in ("get-page", "get-text", "get-page-stats", "get-figure",
+                 "get-region", "ocr-page", "get-info", "render-page"):
+        out = CliRunner().invoke(cli, [cmd, "--help"]).output
+        assert "-l, --leaf" in out, f"{cmd} lacks -l/--leaf"
+        assert "-b, --book" in out, f"{cmd} lacks -b/--book"
+
+
 def test_alto_minimal_parse():
     page = alto.parse_alto_bytes(MINIMAL_ALTO)
     assert page.measurement_unit == "pixel"

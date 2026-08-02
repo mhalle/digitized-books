@@ -17,7 +17,7 @@ from typing import Any
 import click
 
 from iiif_utils.utils import output as output_
-from iiif_utils.utils.page import parse_leaf_spec
+from iiif_utils.utils.page import parse_book_spec, parse_leaf_spec
 
 
 @click.command(name="get-page-stats")
@@ -65,7 +65,7 @@ def get_page_stats(index: Path, leaf_spec: str | None, book_spec: str | None,
     if leaf_spec:
         wanted = set(parse_leaf_spec(leaf_spec))
     elif book_spec:
-        books = {str(b) for b in parse_leaf_spec(book_spec)}
+        books = set(parse_book_spec(book_spec))
         wanted = {r["leaf_num"] for r in conn.execute(
             "SELECT leaf_num, book_page_number FROM page_numbers "
             "WHERE book_page_number IS NOT NULL")

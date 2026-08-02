@@ -34,8 +34,8 @@ from iiif_utils.utils.page import resolve_leaf
 @click.command(name="render-page")
 @click.option("-i", "--index", required=True,
               type=click.Path(exists=True, path_type=Path))
-@click.option("-c", "--canvas", "leaf", type=int, default=None,
-              help="Canvas / leaf number.")
+@click.option("-l", "--leaf", "leaf", type=int, default=None,
+              help="Canvas / leaf number, 0-based.")
 @click.option("-b", "--book", "book_page", default=None,
               help="Printed page number (resolved via page_numbers).")
 @click.option("--layout", "layout_override",

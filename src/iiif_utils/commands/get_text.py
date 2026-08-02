@@ -31,7 +31,7 @@ from iiif_utils.core import http as http_
 from iiif_utils.core import manifest as manifest_mod
 from iiif_utils.providers import resolve
 from iiif_utils.utils import output as output_
-from iiif_utils.utils.page import parse_leaf_spec
+from iiif_utils.utils.page import parse_book_spec, parse_leaf_spec
 
 
 @click.command(name="get-text")
@@ -130,7 +130,7 @@ def _per_page_text(index: Path, *, leaf_spec: str | None,
     if leaf_spec:
         leaves = parse_leaf_spec(leaf_spec)
     else:
-        books = {str(b) for b in parse_leaf_spec(book_spec or "")}
+        books = set(parse_book_spec(book_spec or ""))
         leaves = sorted(
             r["leaf_num"] for r in conn.execute(
                 "SELECT leaf_num, book_page_number FROM page_numbers "
