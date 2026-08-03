@@ -63,5 +63,5 @@ if [ -f "$ROOT/pyproject.toml" ] && [ -w "$ROOT" ]; then
 fi
 
 die "no wheel in $ROOT/wheels/, and $ROOT is not a writable checkout.
-  Build a wheel:           sh $ROOT/scripts/build-wheel.sh
-  Or point at a checkout:  IIIF_UTILS_REPO=/path/to/repo $0 $*"
+  A released bundle always ships a wheel, so this is a broken copy.
+  Point at a checkout instead:  IIIF_UTILS_REPO=/path/to/repo $0 $*"

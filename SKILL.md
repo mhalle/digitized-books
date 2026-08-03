@@ -32,14 +32,14 @@ Substitute the real skill path for `$SKILL_DIR` — no shell variable is
 set for you. If the executable bit was lost in packaging, `sh
 $SKILL_DIR/scripts/iiif-utils ...` works identically.
 
-This directory is both the skill and the Python package — `SKILL.md`,
-`pyproject.toml` and `src/` sit side by side, so there is one
-repository, not two. The launcher copes with both shapes it can be in:
-a released bundle (read-only, no git) runs the prebuilt wheel in
-`wheels/`; a git checkout runs from source so local edits take effect.
-Either way nothing is installed into the user's home as a persistent
-tool. Warm invocations cost ~0.5s; the first use in a session pays a
-one-off dependency resolve.
+An installed skill is self-contained: `SKILL.md`, the launcher, and a
+wheel holding the code. Nothing is installed into the user's home as a
+persistent tool, and nothing is written into the skill directory, so it
+works mounted read-only. Warm invocations cost ~0.5s; the first use in a
+session resolves dependencies once.
+
+The same launcher works in a checkout of the source repository, where it
+runs from source instead so edits take effect immediately.
 
 Do **not** hand-roll the underlying command, and do not use
 `uv tool install`, `uvx`, `pip install`, or `uv run --project

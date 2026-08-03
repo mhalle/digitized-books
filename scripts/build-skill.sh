@@ -1,11 +1,24 @@
 #!/bin/sh
 #
-# Build the installable .skill bundle.
+# Build the installable .skill bundles.
 #
-# Used by BOTH the release workflow and local builds, so the artifact a
-# user installs is identical to the one you can test here. Keeping one
-# exclusion list is the point: a second, hand-maintained copy is how a
-# bundle ends up shipping a stale worktree and a local settings file.
+# The bundle is assembled from an EXPLICIT LIST of what belongs in it,
+# never by copying the repo and excluding what doesn't. That inversion
+# is the point. Every packaging bug this project has had came from the
+# subtractive approach — a stale git worktree and a local settings file
+# rode along in the first bundle, and a second SKILL.md from skills/
+# made the next one refuse to install. With a denylist, anything new in
+# the repo ships by default and you find out downstream. With an
+# allowlist, a file has to be named here to escape.
+#
+# It also means the skill is self-contained rather than a copy of the
+# development tree: the wheel IS the code, so src/, tests/, uv.lock and
+# docs/ have no reason to be there. That is ~400K down to ~140K, and
+# removes the question of whether the source or the wheel is the one
+# actually running.
+#
+# Used by both the release workflow and local builds, so the artifact a
+# user installs is the one you can test here.
 #
 # Usage:
 #   sh scripts/build-skill.sh [output-dir]     # default: dist/
@@ -20,109 +33,73 @@ trap 'chmod -R u+w "$STAGE" 2>/dev/null || true; rm -rf "$STAGE"' EXIT
 
 [ -n "$SKILL_NAME" ] || { echo "no name: in SKILL.md" >&2; exit 1; }
 
+BUNDLE="$STAGE/$SKILL_NAME"
+mkdir -p "$BUNDLE/scripts" "$BUNDLE/wheels" "$OUT_DIR"
+
+# --- everything that ships, and nothing else ---------------------------
+#
+#   SKILL.md            the skill itself
+#   LICENSE             Apache-2.0 §4(a) requires it accompany the work
+#   CHANGELOG.md        what is in this version, for a reader
+#   scripts/iiif-utils  the launcher; the only executable a user runs
+#   wheels/*.whl        the code (built below)
+#
 echo "staging $SKILL_NAME"
-mkdir -p "$STAGE/$SKILL_NAME" "$OUT_DIR"
+cp "$ROOT/SKILL.md" "$ROOT/LICENSE" "$ROOT/CHANGELOG.md" "$BUNDLE/"
+cp "$ROOT/scripts/iiif-utils" "$BUNDLE/scripts/"
+chmod +x "$BUNDLE/scripts/iiif-utils"
 
-# What must NOT ship:
-#   .claude       local agent settings + worktrees (absolute paths, and
-#                 a worktree is a whole second copy of the repo)
-#   .git/.github  version control and CI plumbing
-#   .venv, *cache build/inspection state, regenerable
-#   *.sqlite      indexes; these are the user's data, sometimes large
-#   .iiif-cache   HTTP cache, hundreds of MB
-#   dist          previously built bundles
-rsync -a \
-    --exclude='.claude' \
-    --exclude='.git' \
-    --exclude='.github' \
-    --exclude='.venv' \
-    --exclude='.pytest_cache' \
-    --exclude='.mypy_cache' \
-    --exclude='.ruff_cache' \
-    --exclude='__pycache__' \
-    --exclude='*.pyc' \
-    --exclude='.DS_Store' \
-    --exclude='*.sqlite' \
-    --exclude='.iiif-cache' \
-    --exclude='dist' \
-    --exclude='skills' \
-    "$ROOT/" "$STAGE/$SKILL_NAME/"
-
-# The wheel is what lets the bundle run read-only, with no git and no
-# build backend. Build a fresh one; never carry a stale one across.
+# The wheel carries the version hatch-vcs resolved from git, so it is
+# self-describing with no git and no build backend. Build it from the
+# pristine repo — never from the staged copy — so nothing here can
+# dirty the tree and change the version.
 echo "building wheel"
-rm -f "$STAGE/$SKILL_NAME"/wheels/*.whl
-uv build --wheel --project "$ROOT" -o "$STAGE/$SKILL_NAME/wheels" >/dev/null
+uv build --wheel --project "$ROOT" -o "$BUNDLE/wheels" >/dev/null
+# uv drops a .gitignore into any -o directory; it is not on the list above.
+rm -f "$BUNDLE/wheels/.gitignore"
 
-# hatch-vcs writes _version.py into the SOURCE tree as a build
-# side-effect. It is gitignored, so it survives — and because runtime
-# prefers it, a stale copy reports a version that was true for a tree
-# state that no longer exists. Delete it rather than leaving a liar
-# behind; the wheel carries its own.
+# hatch-vcs writes _version.py into the SOURCE tree as a side-effect.
+# It is gitignored, so it survives, and runtime prefers it — a stale one
+# reports a version true for a tree state that no longer exists. The
+# wheel has its own copy; delete the repo's.
 rm -f "$ROOT/src/iiif_utils/_version.py"
 
-# Pin the resolved version into the STAGED copy, never the repo.
-#
-# The bundle has no .git, so anyone running `uv run --project` against
-# an unpacked copy would otherwise get pyproject's fallback-version.
-# Doing this to the real tree — as an earlier version of the release
-# workflow did — modifies a TRACKED file, which makes hatch-vcs mark
-# the build dirty and stamp `.dYYYYMMDD` onto the very wheel this is
-# meant to support. The staged tree is not a git tree, so pinning here
-# costs nothing.
-VERSION="$(basename "$STAGE/$SKILL_NAME"/wheels/iiif_utils-*.whl \
+VERSION="$(basename "$BUNDLE"/wheels/iiif_utils-*.whl \
     | sed -E 's/^iiif_utils-(.+)-py3-none-any\.whl$/\1/')"
 [ -n "$VERSION" ] || { echo "could not read version from wheel" >&2; exit 1; }
-echo "pinning bundle version $VERSION"
+echo "bundling version $VERSION"
 
-printf '%s\n' \
-    "# Written by scripts/build-skill.sh from the built wheel." \
-    "# The bundle is immutable, so this cannot go stale." \
-    "__version__ = version = \"$VERSION\"" \
-    > "$STAGE/$SKILL_NAME/src/iiif_utils/_version.py"
+# --- guards: backstops, not the mechanism ------------------------------
+# The allowlist above is what makes these unreachable in practice. They
+# stay because both failures are silent and outbound.
+[ ! -e "$BUNDLE/.claude" ] || { echo "error: .claude in bundle" >&2; exit 1; }
 
-sed -e "s/^fallback-version = .*/fallback-version = \"$VERSION\"/" \
-    "$STAGE/$SKILL_NAME/pyproject.toml" > "$STAGE/pyproject.tmp"
-mv "$STAGE/pyproject.tmp" "$STAGE/$SKILL_NAME/pyproject.toml"
+N="$(find "$BUNDLE" -name SKILL.md | wc -l | tr -d ' ')"
+if [ "$N" != "1" ]; then
+    echo "error: bundle has $N SKILL.md files, expected exactly 1" >&2
+    find "$BUNDLE" -name SKILL.md | sed "s|$STAGE/|  |" >&2
+    exit 1
+fi
 
-# Validate under the real bundle directory name — the Agent Skills spec
-# requires it to equal SKILL.md's `name`, and that can only be checked
-# once the directory is named correctly.
 echo "validating"
-uvx --from skills-ref agentskills validate "$STAGE/$SKILL_NAME"
+uvx --from skills-ref agentskills validate "$BUNDLE"
 
-# Exercise it the way a user will: read-only, no git, no checkout.
+# Exercise it the way a user will: read-only, no git, no checkout, and
+# no source tree to fall back on.
 echo "smoke-testing read-only"
-chmod -R a-w "$STAGE/$SKILL_NAME"
-"$STAGE/$SKILL_NAME/scripts/iiif-utils" --version
-chmod -R u+w "$STAGE/$SKILL_NAME"
+chmod -R a-w "$BUNDLE"
+"$BUNDLE/scripts/iiif-utils" --version
+chmod -R u+w "$BUNDLE"
 
-# Refuse to ship a bundle carrying local agent state.
-if [ -e "$STAGE/$SKILL_NAME/.claude" ]; then
-    echo "error: .claude leaked into the bundle" >&2
-    exit 1
-fi
+OUT="$OUT_DIR/$SKILL_NAME.skill"
+rm -f "$OUT"
+( cd "$STAGE" && zip -qr "$OUT" "$SKILL_NAME" )
+echo "built $OUT ($(du -h "$OUT" | cut -f1))"
 
-# A .skill archive must contain EXACTLY ONE SKILL.md. `agentskills
-# validate` does not catch this — it checks the root skill and has no
-# view of the archive — so an installer is the first thing to notice,
-# by refusing to install. Sibling skills under skills/ are excluded
-# above and packaged separately below.
-N_SKILLS="$(find "$STAGE/$SKILL_NAME" -name SKILL.md | wc -l | tr -d ' ')"
-if [ "$N_SKILLS" != "1" ]; then
-    echo "error: bundle contains $N_SKILLS SKILL.md files, expected exactly 1:" >&2
-    find "$STAGE/$SKILL_NAME" -name SKILL.md | sed "s|$STAGE/|  |" >&2
-    exit 1
-fi
-
-BUNDLE="$OUT_DIR/$SKILL_NAME.skill"
-rm -f "$BUNDLE"
-( cd "$STAGE" && zip -qr "$BUNDLE" "$SKILL_NAME" )
-echo "built $BUNDLE ($(du -h "$BUNDLE" | cut -f1))"
-
-# Sibling skills ship as their own archives, for the same
-# one-SKILL.md-per-archive reason. They are instruction-only — no
-# package, no wheel — so staging is a plain copy.
+# --- sibling skills ----------------------------------------------------
+# A .skill archive holds exactly one skill, so anything under skills/
+# ships as its own archive. These are instruction-only — no package, no
+# wheel — so the whole directory is the skill.
 for skill_dir in "$ROOT"/skills/*/; do
     [ -f "${skill_dir}SKILL.md" ] || continue
     name="$(basename "$skill_dir")"

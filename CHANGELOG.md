@@ -5,6 +5,28 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-08-03
+
+### Changed
+
+- **The skill bundle is now self-contained**, assembled from an explicit
+  list of what belongs in it rather than a copy of the repository with
+  exclusions. It holds `SKILL.md`, the launcher, the wheel, `LICENSE` and
+  `CHANGELOG.md` — nothing else. 406K to 133K.
+
+  Every packaging bug here came from the subtractive approach: a stale
+  git worktree and a local settings file rode along in the first bundle,
+  and a second `SKILL.md` made the next one refuse to install. Under a
+  denylist anything new in the repo ships by default; under an allowlist
+  a file has to be named to escape. The `.claude` and one-`SKILL.md`
+  guards remain as backstops, but they are no longer the mechanism.
+
+  It also removes the duplication: the bundle shipped both `src/` and a
+  wheel built from it, leaving open which one actually ran. Now the wheel
+  is the code.
+
+- `scripts/build-wheel.sh` removed; `scripts/build-skill.sh` supersedes it.
+
 ## [0.1.2] - 2026-08-03
 
 ### Fixed
@@ -147,5 +169,6 @@ simultaneously a Python package and a skill.
   geometry, since `ia-utils` never stored them. Both limits are recorded
   in the migrated index's `index_metadata`.
 
+[0.1.3]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.3
 [0.1.2]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.2
 [0.1.1]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.1
