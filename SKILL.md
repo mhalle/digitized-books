@@ -25,12 +25,17 @@ Wellcome b-number, or "this scanned book", this is the tool.
 Always go through the launcher:
 
 ```bash
-$SKILL_DIR/scripts/iiif-utils <command> [options]
+sh $SKILL_DIR/scripts/iiif-utils <command> [options]
 ```
 
 Substitute the real skill path for `$SKILL_DIR` — no shell variable is
-set for you. If the executable bit was lost in packaging, `sh
-$SKILL_DIR/scripts/iiif-utils ...` works identically.
+set for you.
+
+**Keep the `sh`.** The archive records the launcher as executable, but
+Python's `zipfile` does not restore Unix permission bits on extraction,
+and that is what installers use — so an installed copy is almost always
+`-rw-r--r--`. Invoking through `sh` works whether or not the bit
+survived, and needs no `chmod` against a possibly read-only directory.
 
 An installed skill is self-contained: `SKILL.md`, the launcher, and a
 wheel holding the code. Nothing is installed into the user's home as a
@@ -59,13 +64,13 @@ sh $SKILL_DIR/scripts/build-wheel.sh
 To force a specific checkout from anywhere:
 
 ```bash
-IIIF_UTILS_REPO=/path/to/checkout $SKILL_DIR/scripts/iiif-utils <command>
+IIIF_UTILS_REPO=/path/to/checkout sh $SKILL_DIR/scripts/iiif-utils <command>
 ```
 
 Permissions note: the launcher does not start with `uv run`, so an
 allowlist entry matching `uv run *` will not cover it. Allow
-`Bash(*/digitized-books/scripts/iiif-utils *)` (or the absolute path) if
-invocations prompt.
+`Bash(sh */digitized-books/scripts/iiif-utils *)` (or the absolute path)
+if invocations prompt.
 
 **Examples below write `iiif-utils` for brevity — always run it through
 the launcher path above.**

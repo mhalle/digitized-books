@@ -52,6 +52,9 @@ cp "$ROOT/SKILL.md" "$ROOT/LICENSE" "$ROOT/CHANGELOG.md" "$BUNDLE/"
 cp "$ROOT"/references/*.md "$BUNDLE/references/"
 cp "$ROOT/scripts/iiif-utils" "$ROOT/scripts/resolve_outline.py" \
    "$BUNDLE/scripts/"
+# Set it for anyone extracting with unzip(1), but do not rely on it:
+# Python's zipfile drops Unix mode bits on extraction and that is what
+# installers use, so SKILL.md documents `sh <launcher>` instead.
 chmod +x "$BUNDLE/scripts/iiif-utils"
 
 # The wheel carries the version hatch-vcs resolved from git, so it is
