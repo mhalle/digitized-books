@@ -119,9 +119,16 @@ The wheel filename in the listing carries the version. If it shows a
   new version. `release.sh` refuses to reuse a tag that exists on origin
   precisely so this stays a decision rather than an accident.
 - **Bundle shipped something it shouldn't.** `build-skill.sh` hard-fails
-  if `.claude` survives staging; if something else leaks, add it to the
-  single exclusion list in that script — not to the workflow, which
+  if `.claude` survives staging, or if the staged tree holds anything
+  other than exactly one `SKILL.md`. If something else leaks, add it to
+  the single exclusion list in that script — not to the workflow, which
   delegates to it.
+- **"Zip must contain exactly one SKILL.md file."** An installer error,
+  not a build one. A `.skill` archive holds a single skill; sibling
+  skills under `skills/` are excluded from the main bundle and published
+  as their own archives. Note `agentskills validate` does **not** catch
+  this — it validates the root skill and has no view of the archive, so
+  a bundle can validate cleanly and still be uninstallable.
 
 ## If a checkout reports a surprising version
 

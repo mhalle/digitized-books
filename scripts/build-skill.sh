@@ -45,6 +45,7 @@ rsync -a \
     --exclude='*.sqlite' \
     --exclude='.iiif-cache' \
     --exclude='dist' \
+    --exclude='skills' \
     "$ROOT/" "$STAGE/$SKILL_NAME/"
 
 # The wheel is what lets the bundle run read-only, with no git and no
@@ -102,7 +103,35 @@ if [ -e "$STAGE/$SKILL_NAME/.claude" ]; then
     exit 1
 fi
 
+# A .skill archive must contain EXACTLY ONE SKILL.md. `agentskills
+# validate` does not catch this — it checks the root skill and has no
+# view of the archive — so an installer is the first thing to notice,
+# by refusing to install. Sibling skills under skills/ are excluded
+# above and packaged separately below.
+N_SKILLS="$(find "$STAGE/$SKILL_NAME" -name SKILL.md | wc -l | tr -d ' ')"
+if [ "$N_SKILLS" != "1" ]; then
+    echo "error: bundle contains $N_SKILLS SKILL.md files, expected exactly 1:" >&2
+    find "$STAGE/$SKILL_NAME" -name SKILL.md | sed "s|$STAGE/|  |" >&2
+    exit 1
+fi
+
 BUNDLE="$OUT_DIR/$SKILL_NAME.skill"
 rm -f "$BUNDLE"
 ( cd "$STAGE" && zip -qr "$BUNDLE" "$SKILL_NAME" )
 echo "built $BUNDLE ($(du -h "$BUNDLE" | cut -f1))"
+
+# Sibling skills ship as their own archives, for the same
+# one-SKILL.md-per-archive reason. They are instruction-only — no
+# package, no wheel — so staging is a plain copy.
+for skill_dir in "$ROOT"/skills/*/; do
+    [ -f "${skill_dir}SKILL.md" ] || continue
+    name="$(basename "$skill_dir")"
+    rm -rf "${STAGE:?}/sib"
+    mkdir -p "$STAGE/sib/$name"
+    rsync -a --exclude='__pycache__' --exclude='*.pyc' \
+             --exclude='.DS_Store' "$skill_dir" "$STAGE/sib/$name/"
+    uvx --from skills-ref agentskills validate "$STAGE/sib/$name" >/dev/null
+    rm -f "$OUT_DIR/$name.skill"
+    ( cd "$STAGE/sib" && zip -qr "$OUT_DIR/$name.skill" "$name" )
+    echo "built $OUT_DIR/$name.skill ($(du -h "$OUT_DIR/$name.skill" | cut -f1))"
+done

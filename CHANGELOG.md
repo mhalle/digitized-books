@@ -5,6 +5,18 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-08-03
+
+### Fixed
+
+- The 0.1.1 bundle could not be installed: it contained two `SKILL.md`
+  files — its own and `skills/build-outline/`'s — and a `.skill` archive
+  must hold exactly one. `agentskills validate` passed it, because that
+  validates the root skill and has no view of the archive. Sibling skills
+  under `skills/` are now excluded from the main bundle and published as
+  their own archives (`build-outline.skill`), and the builder aborts if a
+  staged bundle ever holds other than exactly one `SKILL.md`.
+
 ## [0.1.1] - 2026-08-03
 
 First usable release. 0.1.0 was withdrawn — its bundle was mislabelled
@@ -135,4 +147,5 @@ simultaneously a Python package and a skill.
   geometry, since `ia-utils` never stored them. Both limits are recorded
   in the migrated index's `index_metadata`.
 
+[0.1.2]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.2
 [0.1.1]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.1
