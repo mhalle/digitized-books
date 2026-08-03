@@ -5,6 +5,37 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.6] - 2026-08-03
+
+### Fixed
+
+- **`get-page` failed with 400 on any source narrower than 1400px.** The
+  default `--size 1400,` went out unmodified, and IIIF level 2 servers do
+  not have to upscale — IA answers an oversized request with 400 rather
+  than clamping. A 1280x808 postcard scan was simply unfetchable.
+
+  Requests are now clamped to what the source can serve, using the
+  dimensions already in the index (`info.json` only when those are
+  missing). `get-page`, `get-pages`, `get-region` and `get-figure` are all
+  affected; for the two region commands the bound is the *crop* size, not
+  the page, since IIIF size applies to the returned region.
+
+  `resolve_max_size()` only ever handled `--size max`; everything else
+  passed through untouched, which is why `resolve_dims()` existed but was
+  used only for bbox clamping.
+
+- A failed image fetch now reports what was requested, the source's
+  actual dimensions, and what to try — instead of a bare status code.
+
+### Changed
+
+- `SKILL.md` claimed image commands fall back to the derivative URLs in
+  `archive_files`. They never did — only the text and PDF paths read that
+  table. The claim is corrected rather than the fallback invented:
+  extracting one page from a `_jp2.zip` means downloading the whole
+  archive, which is not something to do silently. `list-files` and
+  `get-url` surface the derivatives for manual use.
+
 ## [0.1.5] - 2026-08-03
 
 ### Fixed
@@ -202,6 +233,7 @@ simultaneously a Python package and a skill.
   geometry, since `ia-utils` never stored them. Both limits are recorded
   in the migrated index's `index_metadata`.
 
+[0.1.6]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.6
 [0.1.5]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.5
 [0.1.4]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.4
 [0.1.3]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.3

@@ -206,9 +206,16 @@ reference exists to prevent.
   parsed once, not per page.
 - Printed page numbers come from IA's own `_page_numbers.json`, not from
   canvas labels (IA's labels are sequential counters and would be wrong).
-- IA's IIIF image endpoint occasionally fails on very large items
-  (newspapers). Retry, or fall back to the derivative URLs recorded in
-  `archive_files`.
+- IA's IIIF image endpoint can fail on very large items (newspapers).
+  Retrying sometimes helps. There is no automatic fallback to IA's own
+  derivatives — `list-files` and `get-url` show what else exists
+  (`_jp2.zip`, PDF), but fetching from those is a manual step.
+- **Never request a size larger than the source.** IIIF level 2 need not
+  upscale, and IA answers an oversized request with 400 rather than
+  clamping. `get-page` and friends now clamp automatically using the
+  dimensions in the index, but if you pass `--size` explicitly, keep it
+  at or below the native width — `get-info` reports it, and `--size max`
+  resolves it for you.
 - DjVu-only items: leaf numbering is not guaranteed to line up with
   canvases. The tool warns when it can't corroborate the alignment —
   take that warning seriously before trusting page-to-image mapping.

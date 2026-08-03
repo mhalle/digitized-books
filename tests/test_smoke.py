@@ -1942,3 +1942,70 @@ def test_check_update_comparison():
 def test_check_update_registered():
     r = CliRunner().invoke(cli, ["--help"])
     assert "check-update" in r.output
+
+
+def test_clamp_size_never_requests_an_upscale():
+    """IIIF level 2 need not upscale; servers answer 400 rather than
+    clamping. Reported case: a 1280x808 postcard scan rejected the
+    default `1400,` outright."""
+    from iiif_utils.core.image_api import clamp_size_to_native as c
+    # The reported failure
+    assert c("1400,", 1280, 808) == "1280,"
+    # Within native — untouched
+    assert c("800,", 1280, 808) == "800,"
+    assert c("1280,", 1280, 808) == "1280,"
+    # Height-only and both-axes forms
+    assert c(",900", 1280, 808) == ",808"
+    assert c("2000,900", 1280, 808) == "1280,808"
+    assert c("!2000,900", 1280, 808) == "!1280,808"
+    # Percentages cap at 100
+    assert c("pct:150", 1280, 808) == "pct:100"
+    assert c("pct:50", 1280, 808) == "pct:50"
+    # Not upscale requests
+    assert c("full", 1280, 808) == "full"
+    assert c("max", 1280, 808) == "max"
+    # Unknown dims: pass through rather than guess a bound
+    assert c("1400,", None, None) == "1400,"
+    assert c("1400,", None, 808) == "1400,"
+    # Unparseable: leave alone
+    assert c("weird", 1280, 808) == "weird"
+
+
+def test_get_page_clamps_size_to_native(tmp_path, monkeypatch):
+    """End-to-end: the built URL must not exceed the source width."""
+    import sqlite3 as _sql
+    idx = tmp_path / "clamp.sqlite"
+    c = _sql.connect(idx)
+    c.execute("CREATE TABLE page_numbers (leaf_num INTEGER PRIMARY KEY, "
+              "book_page_number TEXT, image_service_url TEXT, "
+              "image_width INT, image_height INT, width INT, height INT)")
+    c.execute("INSERT INTO page_numbers VALUES (0,'1','https://x/svc',"
+              "1280,808,1280,808)")
+    c.commit()
+    c.close()
+    r = CliRunner().invoke(cli, ["get-page", "-i", str(idx), "-l", "0",
+                                  "--url-only"])
+    assert r.exit_code == 0, r.output
+    assert "/full/1280,/0/default.jpg" in r.output, r.output
+    assert "1400," not in r.output
+
+
+def test_get_region_clamps_to_the_crop_not_the_page(tmp_path):
+    """Size applies to the returned region, so the bound is the crop."""
+    import sqlite3 as _sql
+    idx = tmp_path / "clampr.sqlite"
+    c = _sql.connect(idx)
+    c.execute("CREATE TABLE page_numbers (leaf_num INTEGER PRIMARY KEY, "
+              "book_page_number TEXT, image_service_url TEXT, "
+              "image_width INT, image_height INT, width INT, height INT)")
+    c.execute("INSERT INTO page_numbers VALUES (0,'1','https://x/svc',"
+              "4000,3000,4000,3000)")
+    c.commit()
+    c.close()
+    # A 300x200 crop out of a big page: 1400 wide would upscale the crop
+    r = CliRunner().invoke(cli, ["get-region", "-i", str(idx), "-l", "0",
+                                  "--bbox", "10,10,310,210", "--url-only"])
+    assert r.exit_code == 0, r.output
+    # region=10,10,300,200 (x,y,w,h); size clamped from 1400, to the
+    # crop's own 300px width
+    assert "/10,10,300,200/300,/" in r.output, r.output

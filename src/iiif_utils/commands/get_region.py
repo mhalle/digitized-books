@@ -66,6 +66,12 @@ def get_region(index: Path, leaf_num: int | None, book: str | None,
                                           cache_dir=cache_dir)
         bbox = image_api.padded_bbox(bbox, padding,  # type: ignore[arg-type]
                                        canvas_w=cw, canvas_h=ch)
+    # Size applies to the returned REGION, not the source image, so the
+    # upscale bound is the crop's own dimensions. Asking for a width
+    # wider than the crop is what IIIF servers answer with 400.
+    if bbox:
+        size = image_api.clamp_size_to_native(
+            size, int(bbox[2]) - int(bbox[0]), int(bbox[3]) - int(bbox[1]))
     url = image_api.region_url(row["image_service_url"],
                                  bbox, size=size, fmt=fmt)  # type: ignore[arg-type]
 

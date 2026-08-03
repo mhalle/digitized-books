@@ -114,6 +114,59 @@ def resolve_max_size(
     return f"{w},"
 
 
+def clamp_size_to_native(size: str, avail_w: int | None,
+                          avail_h: int | None) -> str:
+    """Reduce a IIIF size string so it never asks for an upscale.
+
+    IIIF Image API level 2 does not have to support upscaling, and
+    servers that don't answer an oversized request with **400**, not by
+    clamping. IA is one of them: a 1280x808 postcard scan rejects the
+    default `1400,` outright, so `get-page` failed on an item that is
+    perfectly fetchable at its own size.
+
+    `avail_w`/`avail_h` are the dimensions of what is actually being
+    requested — the full image for a whole-canvas fetch, the *region*
+    for a crop, since size applies to the returned region rather than
+    the source. Unknown dims (None) mean pass through unchanged: better
+    to send the caller's request than to guess a bound.
+
+    `full`, `max` and anything unparseable pass through — they are not
+    upscale requests.
+    """
+    spec = size.strip()
+    if not spec or spec in ("full", "max"):
+        return spec or size
+
+    if spec.startswith("pct:"):
+        try:
+            pct = float(spec[4:])
+        except ValueError:
+            return size
+        return "pct:100" if pct > 100 else size
+
+    # `!w,h` means "fit within", which is already bounded on both axes,
+    # but an oversized box still upscales on servers that honour it.
+    bang = spec.startswith("!")
+    body = spec[1:] if bang else spec
+    if "," not in body:
+        return size
+    w_s, h_s = body.split(",", 1)
+
+    def _clamp(part: str, avail: int | None) -> str:
+        if not part or avail is None:
+            return part
+        try:
+            want = int(part)
+        except ValueError:
+            return part
+        return str(avail) if want > avail else part
+
+    w_out, h_out = _clamp(w_s, avail_w), _clamp(h_s, avail_h)
+    if (w_out, h_out) == (w_s, h_s):
+        return size
+    return ("!" if bang else "") + f"{w_out},{h_out}"
+
+
 def region_url(
     service_url: str,
     bbox: tuple[int, int, int, int] | None = None,

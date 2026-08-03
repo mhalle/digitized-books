@@ -57,14 +57,21 @@ def get_page(index: Path, leaf_num: int | None, book: str | None,
     conn.row_factory = sqlite3.Row
     leaf_num = resolve_leaf(conn, leaf_num, book)
     row = conn.execute(
-        "SELECT image_service_url FROM page_numbers WHERE leaf_num = ?",
+        "SELECT image_service_url, image_width, image_height, width, height "
+        "FROM page_numbers WHERE leaf_num = ?",
         (leaf_num,),
     ).fetchone()
     if not row or not row["image_service_url"]:
         raise click.ClickException(f"Canvas {leaf_num} has no image_service_url.")
 
+    cfg_http = cfg.get("http", {})
     size = image_api.resolve_max_size(size, row["image_service_url"],
-                                       cfg_http=cfg.get("http", {}))
+                                       cfg_http=cfg_http)
+    # Never ask for an upscale: IIIF level 2 need not support one, and
+    # servers that don't answer 400 rather than clamping. The default
+    # `1400,` is wider than plenty of real scans.
+    nat_w, nat_h = image_api.resolve_dims(row, cfg_http=cfg_http)
+    size = image_api.clamp_size_to_native(size, nat_w, nat_h)
     url = image_api.region_url(row["image_service_url"], None,
                                  size=size, fmt=fmt)
     if url_only:
@@ -72,7 +79,21 @@ def get_page(index: Path, leaf_num: int | None, book: str | None,
         return
     if output_path is None:
         output_path = Path.cwd() / f"page_l{leaf_num}.{fmt}"
-    content = http_.fetch_bytes(url, cfg_http=cfg.get("http", {}))
+    try:
+        content = http_.fetch_bytes(url, cfg_http=cfg_http)
+    except Exception as e:
+        # A 4xx here is usually the request, not the server: an upscale
+        # the source cannot serve, or a region outside it. Say what was
+        # asked for and what else is available, rather than surfacing a
+        # bare status code.
+        native = (f"{nat_w}x{nat_h}" if nat_w and nat_h else "unknown")
+        raise click.ClickException(
+            f"Image fetch failed for canvas {leaf_num}: {e}\n"
+            f"  requested size: {size}   source is {native}\n"
+            f"  try --size max, or a smaller explicit width\n"
+            f"  other derivatives for this work: iiif-utils list-files -i "
+            f"{index}"
+        ) from e
 
     if image_mod.wants_processing(autocontrast=autocontrast, cutoff=cutoff,
                                     preserve_tone=preserve_tone,

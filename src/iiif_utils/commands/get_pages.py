@@ -66,7 +66,8 @@ def _rows_from_index(index_path: Path) -> list[dict[str, Any]]:
     conn = sqlite3.connect(f"file:{index_path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
-        "SELECT leaf_num, image_service_url, book_page_number "
+        "SELECT leaf_num, image_service_url, book_page_number, "
+        "image_width, image_height, width, height "
         "FROM page_numbers "
         "WHERE image_service_url IS NOT NULL ORDER BY leaf_num"
     ).fetchall()
@@ -272,6 +273,8 @@ def get_pages(index: Path | None, manifest_ref: str | None,
         raise click.ClickException("Empty leaf selection.")
 
     by_idx = {r["leaf_num"]: r["image_service_url"] for r in rows}
+    dims_by_idx = {r["leaf_num"]: image_api.clamp_dims_from_page_row(r)
+                   for r in rows}
     book_pn = {r["leaf_num"]: r["book_page_number"] for r in rows}
     urls: list[tuple[int, str]] = []
     for i in wanted:
@@ -283,6 +286,11 @@ def get_pages(index: Path | None, manifest_ref: str | None,
                                                 cfg_http=cfg_http,
                                                 cache_dir=cache_dir)
                     if size == "max" else size)
+        # Never request an upscale — servers answer 400, not a clamp.
+        # Uses stored dims only: one info.json per canvas would be a
+        # round trip per page on a whole-book fetch.
+        nw, nh = dims_by_idx.get(i, (None, None))
+        eff_size = image_api.clamp_size_to_native(eff_size, nw, nh)
         urls.append((i, image_api.region_url(by_idx[i], None,
                                               size=eff_size, fmt=fmt)))
 
