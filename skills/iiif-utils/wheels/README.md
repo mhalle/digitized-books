@@ -19,5 +19,5 @@ the source form instead:
 uv run --project /path/to/iiif iiif-utils <command>
 ```
 
-The launcher (`../bin/iiif-utils`) picks the newest wheel here, so a
+The launcher (`../scripts/iiif-utils`) picks the newest wheel here, so a
 stale build left behind never shadows a fresh one.

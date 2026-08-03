@@ -8,8 +8,8 @@
 # mounted read-only.
 #
 # Usage:
-#   <skill>/bin/iiif-utils <command> [options]
-#   sh <skill>/bin/iiif-utils <command> [options]   (if +x was lost)
+#   <skill>/scripts/iiif-utils <command> [options]
+#   sh <skill>/scripts/iiif-utils <command> [options]   (if +x was lost)
 #
 # Environment:
 #   IIIF_UTILS_REPO   Path to an iiif checkout. When set, runs from

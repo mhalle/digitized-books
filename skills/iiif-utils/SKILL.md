@@ -1,6 +1,10 @@
 ---
 name: iiif-utils
-description: Work with digitized books from the Internet Archive and IIIF libraries (Wellcome, Library of Congress, Munich/MDZ, Gallica, Heidelberg) through one tool. Use for archive.org items, IIIF manifests, historical texts, anatomical atlases, medical textbooks, or any scanned book. Covers searching library and archive.org catalogs, building searchable SQLite indexes from OCR (hOCR, ALTO, DjVu), full-text search over a book, pulling page images, cropping figures and arbitrary regions, downloading PDFs, per-page OCR text, page statistics for finding plates, reconstructing reading order for multi-column or tabular pages, and navigation outlines. Triggers on "Internet Archive", "archive.org", "IA item", "IIIF", "manifest", "OCR index", "search inside a book", "get me page N", "extract this figure", or any digitized-book research. Supersedes the older ia-utils tool; use `migrate-index` to read ia-utils indexes.
+description: Use when working with scanned books held by the Internet Archive (archive.org) or a IIIF library — Wellcome Collection, Library of Congress, Gallica (BnF), Munich's MDZ / Bayerische Staatsbibliothek, or Heidelberg. Use to find an edition, search the text inside a specific scanned book, read what a given page says, pull page images or the PDF, crop a figure or plate, or reconstruct multi-column and tabular pages that OCR scrambled. Trigger on archive.org links and identifiers, IIIF manifest URLs, Wellcome b-numbers, LCCNs, and on requests like "what does this atlas say about the femur", "get me page 212", "find where this book discusses X", or "pull that plate as an image" — even when the user never says IIIF, OCR, or names a library. Not for PDFs or images the user already has locally, and not for born-digital publications.
+compatibility: Requires uv and Python 3.10+, plus network access to archive.org and the IIIF host. The ocr-page command additionally needs tesseract installed in the OS.
+metadata:
+  author: mhalle
+  repository: https://github.com/mhalle/iiif
 ---
 
 # iiif-utils: digitized books from Internet Archive and IIIF libraries
@@ -19,12 +23,12 @@ Wellcome b-number, or "this scanned book", this is the tool.
 Always go through the launcher:
 
 ```bash
-$SKILL_DIR/bin/iiif-utils <command> [options]
+$SKILL_DIR/scripts/iiif-utils <command> [options]
 ```
 
 Substitute the real skill path for `$SKILL_DIR` — no shell variable is
 set for you. If the executable bit was lost in packaging, `sh
-$SKILL_DIR/bin/iiif-utils ...` works identically.
+$SKILL_DIR/scripts/iiif-utils ...` works identically.
 
 The launcher runs a prebuilt wheel in an ephemeral uv environment.
 Nothing is installed into the user's home as a persistent tool, and
@@ -49,13 +53,16 @@ sh $SKILL_DIR/scripts/build-wheel.sh /path/to/iiif
 checkout so you exercise your edits rather than the shipped wheel:
 
 ```bash
-IIIF_UTILS_REPO=/path/to/iiif $SKILL_DIR/bin/iiif-utils <command>
+IIIF_UTILS_REPO=/path/to/iiif $SKILL_DIR/scripts/iiif-utils <command>
 ```
 
 Permissions note: the launcher does not start with `uv run`, so an
 allowlist entry matching `uv run *` will not cover it. Allow
-`Bash(*/skills/iiif-utils/bin/iiif-utils *)` (or the absolute path) if
+`Bash(*/skills/iiif-utils/scripts/iiif-utils *)` (or the absolute path) if
 invocations prompt.
+
+**Examples below write `iiif-utils` for brevity — always run it through
+the launcher path above.**
 
 ## Addressing a page: leaf vs printed page
 
