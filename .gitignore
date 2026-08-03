@@ -23,3 +23,6 @@ __pycache__/
 # generated indexes (don't accidentally commit user data)
 *.sqlite
 *.sqlite-journal
+
+# macOS
+.DS_Store
