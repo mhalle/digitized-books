@@ -7,9 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.1] - 2026-08-03
 
+First usable release. 0.1.0 was withdrawn — its bundle was mislabelled
+and its tag has been deleted, so nothing references it. The feature list
+below under 0.1.0 describes what this release contains.
+
 ### Fixed
 
-- The 0.1.0 release bundle shipped a wheel stamped
+- The withdrawn 0.1.0 bundle shipped a wheel stamped
   `0.1.1.dev0+gbaef62c2e.d20260803` rather than `0.1.0`. The release
   workflow patched `pyproject.toml`'s `fallback-version` — a tracked
   file — before building, so the tree was dirty and `hatch-vcs` marked
@@ -22,9 +26,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Use this release rather than 0.1.0.
 
-## [0.1.0] - 2026-08-03
+## [0.1.0] - withdrawn
 
-First release. The CLI is `iiif-utils`; the Agent Skill is
+Never usable: the published bundle carried a mislabelled version, and
+the release and tag were deleted the same day. Its contents shipped as
+0.1.1. Retained here because it is the feature inventory for that
+release.
+
+The CLI is `iiif-utils`; the Agent Skill is
 `digitized-books`. They are the same thing — this repository is
 simultaneously a Python package and a skill.
 
@@ -127,4 +136,3 @@ simultaneously a Python package and a skill.
   in the migrated index's `index_metadata`.
 
 [0.1.1]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.1
-[0.1.0]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.0
