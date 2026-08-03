@@ -53,6 +53,14 @@ echo "building wheel"
 rm -f "$STAGE/$SKILL_NAME"/wheels/*.whl
 uv build --wheel --project "$ROOT" -o "$STAGE/$SKILL_NAME/wheels" >/dev/null
 
+# hatch-vcs writes _version.py into the SOURCE tree as a build
+# side-effect. It is gitignored, so it survives — and because runtime
+# prefers it, a stale copy reports a version that was true for a tree
+# state that no longer exists. The wheel already carries its own, so
+# delete the source-tree one rather than leaving a liar behind.
+rm -f "$ROOT/src/iiif_utils/_version.py" \
+      "$STAGE/$SKILL_NAME/src/iiif_utils/_version.py"
+
 # Validate under the real bundle directory name — the Agent Skills spec
 # requires it to equal SKILL.md's `name`, and that can only be checked
 # once the directory is named correctly.
