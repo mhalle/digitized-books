@@ -5,6 +5,32 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.7] - 2026-08-03
+
+### Added
+
+- `get-page --source auto|iiif|bookreader|jp2`. Internet Archive serves
+  page images outside the Image API, and those endpoints do not share its
+  constraints:
+
+  - **bookreader** — `/download/{id}/page/leaf{N}_{small|medium|large}.jpg`,
+    keyed on identifier and leaf alone.
+  - **jp2** — the original scan, fetched as a *single member* of
+    `_jp2.zip` via IA's zip-as-directory URLs. No archive download.
+
+  On `auto` (the default) a failed IIIF fetch now falls back to
+  bookreader, then jp2, warning on stderr because the bytes differ from
+  what `--size` requested. 0.1.6 claimed such a fallback was impractical;
+  that was wrong on both counts.
+
+  The JP2 path is derived from the stored IIIF service URL rather than
+  rebuilt from the identifier: the zip and its members are named after
+  the item's scan prefix, which frequently is not the identifier —
+  `1913-s.-s.-olympic-...` stores pages under `1913 S.S. OLYMPIC White
+  Star Line Postcard_jp2/`, so an identifier-derived guess 404s.
+
+  `get-region` and `get-figure` keep no fallback: only IIIF can crop.
+
 ## [0.1.6] - 2026-08-03
 
 ### Fixed
@@ -233,6 +259,7 @@ simultaneously a Python package and a skill.
   geometry, since `ia-utils` never stored them. Both limits are recorded
   in the migrated index's `index_metadata`.
 
+[0.1.7]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.7
 [0.1.6]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.6
 [0.1.5]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.5
 [0.1.4]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.4

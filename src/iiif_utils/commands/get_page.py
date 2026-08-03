@@ -10,6 +10,7 @@ from iiif_utils.config import load_config
 from iiif_utils.core import http as http_
 from iiif_utils.core import image as image_mod
 from iiif_utils.core import image_api
+from iiif_utils.providers import internet_archive as ia_mod
 from iiif_utils.utils.page import resolve_leaf
 
 
@@ -28,6 +29,12 @@ from iiif_utils.utils.page import resolve_leaf
                    " (use this if a server rejects '/full/full/').")
 @click.option("--format", "fmt", default="jpg")
 @click.option("--url-only", is_flag=True, default=False)
+@click.option("--source", "source",
+              type=click.Choice(["auto", "iiif", "bookreader", "jp2"]),
+              default="auto", show_default=True,
+              help="Where to fetch the image. 'auto' uses IIIF and falls "
+                   "back to IA's own endpoints if it fails. 'bookreader' "
+                   "and 'jp2' are Internet Archive only.")
 @click.option("--autocontrast", is_flag=True, default=False,
               help="Stretch contrast after download. Old letterpress "
                    "scans are often flat and grey; this is what makes "
@@ -44,8 +51,8 @@ from iiif_utils.utils.page import resolve_leaf
               default=None)
 def get_page(index: Path, leaf_num: int | None, book: str | None,
               output_path: Path | None, size: str, fmt: str,
-              url_only: bool, autocontrast: bool, cutoff: int | None,
-              preserve_tone: bool, quality: int | None,
+              url_only: bool, source: str, autocontrast: bool,
+              cutoff: int | None, preserve_tone: bool, quality: int | None,
               config_path: Path | None) -> None:
     """Download a whole canvas image."""
     aliases = {"small": "400,", "medium": "800,", "large": "1600,",
@@ -72,8 +79,41 @@ def get_page(index: Path, leaf_num: int | None, book: str | None,
     # `1400,` is wider than plenty of real scans.
     nat_w, nat_h = image_api.resolve_dims(row, cfg_http=cfg_http)
     size = image_api.clamp_size_to_native(size, nat_w, nat_h)
-    url = image_api.region_url(row["image_service_url"], None,
-                                 size=size, fmt=fmt)
+
+    # Internet Archive serves the same page outside the Image API: the
+    # BookReader endpoint (identifier + leaf, three fixed sizes) and the
+    # original JP2 via zip-as-directory, which fetches ONE member without
+    # transferring the archive. Both bypass Image-API constraints, so
+    # they are the fallback when IIIF refuses.
+    ia_ident = _doc_value(conn, "identifier:ia")
+    ia_fallbacks: list[tuple[str, str]] = []
+    if ia_ident:
+        want_w = None
+        if "," in size and size.split(",")[0].isdigit():
+            want_w = int(size.split(",")[0])
+        elif nat_w:
+            want_w = nat_w
+        ia_fallbacks.append((
+            "bookreader",
+            ia_mod.bookreader_image_url(
+                ia_ident, leaf_num, ia_mod.bookreader_size_for(want_w))))
+        jp2 = ia_mod.jp2_url_from_service(row["image_service_url"])
+        if jp2:
+            ia_fallbacks.append(("jp2 (original)", jp2))
+
+    if source in ("bookreader", "jp2"):
+        if not ia_ident:
+            raise click.ClickException(
+                f"--source {source} is Internet Archive only; this index "
+                f"has no IA identifier.")
+        picked = [u for label, u in ia_fallbacks if label.startswith(source)]
+        if not picked:
+            raise click.ClickException(
+                f"--source {source} is unavailable for canvas {leaf_num}.")
+        url = picked[0]
+    else:
+        url = image_api.region_url(row["image_service_url"], None,
+                                     size=size, fmt=fmt)
     if url_only:
         click.echo(url)
         return
@@ -82,18 +122,34 @@ def get_page(index: Path, leaf_num: int | None, book: str | None,
     try:
         content = http_.fetch_bytes(url, cfg_http=cfg_http)
     except Exception as e:
-        # A 4xx here is usually the request, not the server: an upscale
-        # the source cannot serve, or a region outside it. Say what was
-        # asked for and what else is available, rather than surfacing a
-        # bare status code.
-        native = (f"{nat_w}x{nat_h}" if nat_w and nat_h else "unknown")
-        raise click.ClickException(
-            f"Image fetch failed for canvas {leaf_num}: {e}\n"
-            f"  requested size: {size}   source is {native}\n"
-            f"  try --size max, or a smaller explicit width\n"
-            f"  other derivatives for this work: iiif-utils list-files -i "
-            f"{index}"
-        ) from e
+        if source != "auto" or not ia_fallbacks:
+            native = (f"{nat_w}x{nat_h}" if nat_w and nat_h else "unknown")
+            raise click.ClickException(
+                f"Image fetch failed for canvas {leaf_num}: {e}\n"
+                f"  requested size: {size}   source is {native}\n"
+                f"  try --size max, or a smaller explicit width\n"
+                f"  other derivatives: iiif-utils list-files -i {index}"
+            ) from e
+        # IA publishes the same page through endpoints that don't share
+        # the Image API's constraints. Fall back rather than fail, but
+        # say so — the bytes you get are not the ones you asked for.
+        fetched: bytes | None = None
+        for label, fb_url in ia_fallbacks:
+            try:
+                fetched = http_.fetch_bytes(fb_url, cfg_http=cfg_http)
+            except Exception:
+                continue
+            click.echo(f"WARN: IIIF fetch failed ({e}); used IA {label} "
+                       f"instead — size/format differ from --size {size}",
+                       err=True)
+            url = fb_url
+            break
+        if fetched is None:
+            raise click.ClickException(
+                f"Image fetch failed for canvas {leaf_num} on IIIF and on "
+                f"IA's bookreader/jp2 endpoints: {e}"
+            ) from e
+        content = fetched
 
     if image_mod.wants_processing(autocontrast=autocontrast, cutoff=cutoff,
                                     preserve_tone=preserve_tone,
@@ -105,3 +161,14 @@ def get_page(index: Path, leaf_num: int | None, book: str | None,
         )
     output_path.write_bytes(content)
     click.echo(f"saved {output_path}  ({len(content)/1024:.1f} KB)")
+
+
+def _doc_value(conn: sqlite3.Connection, key: str) -> str | None:
+    """Read one key from document_metadata, tolerating older indexes."""
+    try:
+        row = conn.execute(
+            "SELECT value FROM document_metadata WHERE key = ?", (key,)
+        ).fetchone()
+    except sqlite3.Error:
+        return None
+    return row[0] if row else None

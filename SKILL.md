@@ -206,10 +206,15 @@ reference exists to prevent.
   parsed once, not per page.
 - Printed page numbers come from IA's own `_page_numbers.json`, not from
   canvas labels (IA's labels are sequential counters and would be wrong).
-- IA's IIIF image endpoint can fail on very large items (newspapers).
-  Retrying sometimes helps. There is no automatic fallback to IA's own
-  derivatives — `list-files` and `get-url` show what else exists
-  (`_jp2.zip`, PDF), but fetching from those is a manual step.
+- IA serves page images three ways, and `get-page --source` picks:
+  `iiif` (default, croppable, arbitrary sizes), `bookreader`
+  (`/download/{id}/page/leaf{N}_{small|medium|large}.jpg` — keyed on
+  identifier and leaf, no Image-API constraints), and `jp2` (the
+  original scan, fetched as a single member of `_jp2.zip` without
+  transferring the archive). On `auto`, a failed IIIF fetch falls back
+  to bookreader then jp2 and says so on stderr, since the bytes differ
+  from what `--size` asked for. Only `iiif` supports cropping, so
+  `get-region` and `get-figure` have no fallback.
 - **Never request a size larger than the source.** IIIF level 2 need not
   upscale, and IA answers an oversized request with 400 rather than
   clamping. `get-page` and friends now clamp automatically using the

@@ -221,6 +221,61 @@ def fetch_manifest(identifier: str, *, cfg_http: dict[str, Any],
                               cfg_http=cfg_http, cache_dir=cache_dir)
 
 
+# IA serves page images two ways besides IIIF, and both matter when the
+# IIIF Image endpoint refuses a request (it 400s on any upscale, and can
+# fail outright on very large items).
+BOOKREADER_SIZES = ("small", "medium", "large")
+
+
+def bookreader_image_url(identifier: str, leaf: int,
+                          size: str = "large") -> str:
+    """IA's BookReader page image — `.../download/{id}/page/leaf{N}_{size}.jpg`.
+
+    Keyed on the identifier and leaf number alone, so unlike the JP2 path
+    it needs no knowledge of the item's internal zip naming. Sizes are
+    IA's own three buckets, not pixel dimensions.
+    """
+    if size not in BOOKREADER_SIZES:
+        raise ValueError(f"size must be one of {BOOKREADER_SIZES}")
+    return (f"https://archive.org/download/{identifier}"
+            f"/page/leaf{leaf}_{size}.jpg")
+
+
+def bookreader_size_for(width: int | None) -> str:
+    """Map a requested pixel width onto IA's three buckets."""
+    if width is None:
+        return "large"
+    if width <= 400:
+        return "small"
+    if width <= 800:
+        return "medium"
+    return "large"
+
+
+def jp2_url_from_service(service_url: str) -> str | None:
+    """Original JP2 for a canvas, via IA's zip-as-directory download.
+
+    IA serves individual members of a `_jp2.zip` without transferring the
+    archive, so this is a single-file fetch. The path is recovered from
+    the IIIF service URL rather than rebuilt from the identifier: the zip
+    and its members are named after the item's *scan* prefix, which is
+    often not the identifier — `1913-s.-s.-olympic-...` stores its pages
+    under `1913 S.S. OLYMPIC White Star Line Postcard_jp2/`, so an
+    identifier-derived guess 404s.
+
+    Only the `%2F` separators are decoded; `%20` and friends stay encoded
+    because they are part of the filenames.
+    """
+    marker = "/image/iiif/3/"
+    if marker not in service_url:
+        return None
+    tail = service_url.split(marker, 1)[1]
+    path = tail.replace("%2F", "/").replace("%2f", "/")
+    if not path:
+        return None
+    return f"https://archive.org/download/{path}"
+
+
 def is_ia_host(url: str) -> bool:
     """True if this URL is an IA-hosted (details/download/iiif) URL."""
     host = urlparse(url).hostname or ""

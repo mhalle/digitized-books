@@ -2009,3 +2009,83 @@ def test_get_region_clamps_to_the_crop_not_the_page(tmp_path):
     # region=10,10,300,200 (x,y,w,h); size clamped from 1400, to the
     # crop's own 300px width
     assert "/10,10,300,200/300,/" in r.output, r.output
+
+
+def test_ia_bookreader_url():
+    from iiif_utils.providers.internet_archive import (
+        bookreader_image_url, bookreader_size_for)
+    assert bookreader_image_url("gray", 24, "large") == (
+        "https://archive.org/download/gray/page/leaf24_large.jpg")
+    # Keyed on identifier + leaf only — no zip naming involved
+    assert "leaf0_small" in bookreader_image_url("x-y.z", 0, "small")
+    import pytest
+    with pytest.raises(ValueError):
+        bookreader_image_url("gray", 0, "1400,")
+    assert bookreader_size_for(300) == "small"
+    assert bookreader_size_for(800) == "medium"
+    assert bookreader_size_for(1400) == "large"
+    assert bookreader_size_for(None) == "large"
+
+
+def test_ia_jp2_url_uses_the_items_own_scan_prefix():
+    """The zip is named after the scan prefix, not the identifier — an
+    identifier-derived guess 404s on items like the OLYMPIC postcard."""
+    from iiif_utils.providers.internet_archive import jp2_url_from_service
+    svc = ("https://iiif.archive.org/image/iiif/3/"
+           "1913-s.-s.-olympic-white-star-line-postcard%2F"
+           "1913%20S.S.%20OLYMPIC%20White%20Star%20Line%20Postcard_jp2.zip%2F"
+           "1913%20S.S.%20OLYMPIC%20White%20Star%20Line%20Postcard_jp2%2F"
+           "1913%20S.S.%20OLYMPIC%20White%20Star%20Line%20Postcard_0000.jp2")
+    url = jp2_url_from_service(svc)
+    assert url is not None
+    assert url.startswith("https://archive.org/download/"
+                          "1913-s.-s.-olympic-white-star-line-postcard/")
+    # %2F separators decoded; %20 inside filenames left alone
+    assert "%2F" not in url
+    assert "%20S.S.%20OLYMPIC" in url
+    assert url.endswith("_0000.jp2")
+    # Non-IA service URLs have no jp2 path to recover
+    assert jp2_url_from_service("https://iiif.wellcome.org/image/x") is None
+
+
+def test_get_page_source_flag(tmp_path):
+    import sqlite3 as _sql
+    idx = tmp_path / "src.sqlite"
+    c = _sql.connect(idx)
+    c.execute("CREATE TABLE page_numbers (leaf_num INTEGER PRIMARY KEY, "
+              "book_page_number TEXT, image_service_url TEXT, "
+              "image_width INT, image_height INT, width INT, height INT)")
+    c.execute("INSERT INTO page_numbers VALUES (0,'1',"
+              "'https://iiif.archive.org/image/iiif/3/gray%2Fgray_jp2.zip%2F"
+              "gray_jp2%2Fgray_0000.jp2',1280,808,1280,808)")
+    c.execute("CREATE TABLE document_metadata (key TEXT PRIMARY KEY, value TEXT)")
+    c.execute("INSERT INTO document_metadata VALUES ('identifier:ia','gray')")
+    c.commit()
+    c.close()
+    r = CliRunner().invoke(cli, ["get-page", "-i", str(idx), "-l", "0",
+                                  "--source", "bookreader", "--url-only"])
+    assert r.exit_code == 0, r.output
+    assert "/page/leaf0_large.jpg" in r.output
+    r2 = CliRunner().invoke(cli, ["get-page", "-i", str(idx), "-l", "0",
+                                   "--source", "jp2", "--url-only"])
+    assert "_jp2.zip/gray_jp2/gray_0000.jp2" in r2.output, r2.output
+    # Default still IIIF, clamped
+    r3 = CliRunner().invoke(cli, ["get-page", "-i", str(idx), "-l", "0",
+                                   "--url-only"])
+    assert "iiif.archive.org" in r3.output and "/1280,/" in r3.output
+
+
+def test_get_page_source_rejects_non_ia(tmp_path):
+    import sqlite3 as _sql
+    idx = tmp_path / "w.sqlite"
+    c = _sql.connect(idx)
+    c.execute("CREATE TABLE page_numbers (leaf_num INTEGER PRIMARY KEY, "
+              "book_page_number TEXT, image_service_url TEXT, "
+              "image_width INT, image_height INT, width INT, height INT)")
+    c.execute("INSERT INTO page_numbers VALUES (0,'1','https://w/svc',900,1200,900,1200)")
+    c.commit()
+    c.close()
+    r = CliRunner().invoke(cli, ["get-page", "-i", str(idx), "-l", "0",
+                                  "--source", "bookreader", "--url-only"])
+    assert r.exit_code != 0
+    assert "Internet Archive only" in r.output
