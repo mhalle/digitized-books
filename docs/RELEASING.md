@@ -42,6 +42,21 @@ network. That is why the bundle ships a wheel: not a workaround for
 read-only directories, but the mechanism that makes the version
 trustworthy.
 
+## First release: bootstrapping the remote
+
+Only needed once, and only if `git remote -v` is empty.
+
+```bash
+gh repo create digitized-books --public --source=. --remote=origin
+git push -u origin HEAD
+git push origin v0.1.0        # the tag push is what triggers CI
+```
+
+Visibility matters more than it looks: `SKILL.md`'s download URL and
+`iiif-utils check-update` both hit **public** release endpoints. A
+private repo makes them 404 for everyone, so the skill cannot report or
+fetch its own updates.
+
 ## Cutting a release
 
 ```bash
@@ -60,6 +75,50 @@ stale `src/iiif_utils/_version.py`.
 CI re-checks the last of those independently — if HEAD does not describe
 as the pushed tag, the release fails rather than publishing a
 mislabelled bundle.
+
+## What CI does on a `v*` tag
+
+`.github/workflows/release.yml`, in order:
+
+1. Checks out with full history (`fetch-depth: 0`) — hatch-vcs needs the
+   tags, and a shallow clone silently yields a wrong version.
+2. Verifies `git describe` equals the tag exactly.
+3. Writes `src/iiif_utils/_version.py` and patches `fallback-version`
+   from the tag. Redundant for the wheel, which carries its own; this is
+   for anyone running `uv run --project` against an unpacked bundle,
+   where there is no git.
+4. Runs the tests.
+5. Runs `scripts/build-skill.sh` — the same script you run locally, so
+   the published artifact and a local one are identical by construction.
+   It validates the bundle under its real directory name and smoke-tests
+   it read-only.
+6. Publishes `digitized-books.skill` (and `.zip`), both version-stamped
+   and `latest`-style unversioned copies.
+
+## Verifying a published release
+
+```bash
+uv run iiif-utils check-update          # should report 'current' post-install
+curl -sL -o /tmp/x.skill \
+  https://github.com/mhalle/digitized-books/releases/latest/download/digitized-books.skill
+unzip -l /tmp/x.skill | grep -E 'SKILL.md|\.whl'
+```
+
+The wheel filename in the listing carries the version. If it shows a
+`.devN` or `.dYYYYMMDD` suffix, the build did not happen at a clean tag
+— treat the release as bad.
+
+## When it goes wrong
+
+- **Tag pushed at the wrong commit.** Do not move a published tag;
+  consumers may already have it. Cut the next patch version instead.
+- **CI failed after the tag was pushed.** Fix forward, then re-tag at a
+  new version. `release.sh` refuses to reuse a tag that exists on origin
+  precisely so this stays a decision rather than an accident.
+- **Bundle shipped something it shouldn't.** `build-skill.sh` hard-fails
+  if `.claude` survives staging; if something else leaks, add it to the
+  single exclusion list in that script — not to the workflow, which
+  delegates to it.
 
 ## If a checkout reports a surprising version
 
