@@ -1,13 +1,14 @@
 ---
-name: iiif-utils
+name: digitized-books
 description: Use when working with scanned books held by the Internet Archive (archive.org) or a IIIF library — Wellcome Collection, Library of Congress, Gallica (BnF), Munich's MDZ / Bayerische Staatsbibliothek, or Heidelberg. Use to find an edition, search the text inside a specific scanned book, read what a given page says, pull page images or the PDF, crop a figure or plate, or reconstruct multi-column and tabular pages that OCR scrambled. Trigger on archive.org links and identifiers, IIIF manifest URLs, Wellcome b-numbers, LCCNs, and on requests like "what does this atlas say about the femur", "get me page 212", "find where this book discusses X", or "pull that plate as an image" — even when the user never says IIIF, OCR, or names a library. Not for PDFs or images the user already has locally, and not for born-digital publications.
 compatibility: Requires uv and Python 3.10+, plus network access to archive.org and the IIIF host. The ocr-page command additionally needs tesseract installed in the OS.
 metadata:
   author: mhalle
-  repository: https://github.com/mhalle/iiif
+  repository: https://github.com/mhalle/digitized-books
+  download: https://github.com/mhalle/digitized-books/releases/latest/download/digitized-books.skill
 ---
 
-# iiif-utils: digitized books from Internet Archive and IIIF libraries
+# digitized-books: Internet Archive and IIIF libraries, one tool
 
 One CLI over two worlds that used to need separate tools. Internet
 Archive is a **full provider** here, not a viewer bolted on: `archive.org`
@@ -30,11 +31,14 @@ Substitute the real skill path for `$SKILL_DIR` — no shell variable is
 set for you. If the executable bit was lost in packaging, `sh
 $SKILL_DIR/scripts/iiif-utils ...` works identically.
 
-The launcher runs a prebuilt wheel in an ephemeral uv environment.
-Nothing is installed into the user's home as a persistent tool, and
-nothing is written into the skill directory, so it works when the skill
-is mounted read-only. Warm invocations cost ~0.5s; the first use in a
-session pays a one-off dependency resolve.
+This directory is both the skill and the Python package — `SKILL.md`,
+`pyproject.toml` and `src/` sit side by side, so there is one
+repository, not two. The launcher copes with both shapes it can be in:
+a released bundle (read-only, no git) runs the prebuilt wheel in
+`wheels/`; a git checkout runs from source so local edits take effect.
+Either way nothing is installed into the user's home as a persistent
+tool. Warm invocations cost ~0.5s; the first use in a session pays a
+one-off dependency resolve.
 
 Do **not** hand-roll the underlying command, and do not use
 `uv tool install`, `uvx`, `pip install`, or `uv run --project
@@ -42,23 +46,24 @@ Do **not** hand-roll the underlying command, and do not use
 uv writes `.venv` into the project, and hatch-vcs's build hook writes
 `_version.py` back into the source tree.
 
-**If `wheels/` is empty** (wheels aren't committed — the version embeds
-a git hash, so they'd churn history), build one:
+In a checkout, `wheels/` is empty and the launcher runs from source —
+that is expected, and it means edits take effect immediately. Wheels
+are built by the release workflow, not committed (their version string
+embeds a git hash, so they would churn history). To build one anyway:
 
 ```bash
-sh $SKILL_DIR/scripts/build-wheel.sh /path/to/iiif
+sh $SKILL_DIR/scripts/build-wheel.sh
 ```
 
-**Working on the iiif repo itself?** Point the launcher at your
-checkout so you exercise your edits rather than the shipped wheel:
+To force a specific checkout from anywhere:
 
 ```bash
-IIIF_UTILS_REPO=/path/to/iiif $SKILL_DIR/scripts/iiif-utils <command>
+IIIF_UTILS_REPO=/path/to/checkout $SKILL_DIR/scripts/iiif-utils <command>
 ```
 
 Permissions note: the launcher does not start with `uv run`, so an
 allowlist entry matching `uv run *` will not cover it. Allow
-`Bash(*/skills/iiif-utils/scripts/iiif-utils *)` (or the absolute path) if
+`Bash(*/digitized-books/scripts/iiif-utils *)` (or the absolute path) if
 invocations prompt.
 
 **Examples below write `iiif-utils` for brevity — always run it through
@@ -178,6 +183,22 @@ Layout modes need `page_words`, which older indexes lack — add it with
   canvases. The tool warns when it can't corroborate the alignment —
   take that warning seriously before trusting page-to-image mapping.
 
+## Staying current
+
+`--version` reports the running build. To find out whether it is stale:
+
+```bash
+iiif-utils check-update
+```
+
+It compares the running version against the latest published release
+and, when one is newer, prints the `.skill` download URL. A build like
+`0.1.0.dev12+g58296f4` is a *development* build of 0.1.0, so it reads
+as behind 0.1.0, not ahead of it.
+
+Offer this when the user hits behaviour the docs describe but the
+installed copy doesn't have.
+
 ## Notes
 
 - Config lives in the source tree and project-local overrides; the HTTP
@@ -187,3 +208,5 @@ Layout modes need `page_words`, which older indexes lack — add it with
 - Supersedes **ia-utils**, which is in maintenance mode. Existing
   ia-utils indexes: `migrate-index` for search-only use, or
   `create-index` from the identifier for full function (images, layout).
+- The CLI is named `iiif-utils` (that is the Python package); the skill
+  is named `digitized-books`. Same thing.

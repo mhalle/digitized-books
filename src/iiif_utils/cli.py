@@ -4,6 +4,7 @@ from __future__ import annotations
 import click
 
 from iiif_utils import __version__
+from iiif_utils.commands.check_update import check_update
 from iiif_utils.commands.create_index import create_index
 from iiif_utils.commands.get_figure import get_figure
 from iiif_utils.commands.get_info import get_info
@@ -53,6 +54,7 @@ cli.add_command(ocr_page)
 cli.add_command(create_index)
 cli.add_command(rebuild_index)
 cli.add_command(migrate_index)
+cli.add_command(check_update)
 cli.add_command(search_catalog)
 cli.add_command(search_catalog, name="search-cat")  # alias
 cli.add_command(search_index)

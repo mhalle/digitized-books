@@ -1,0 +1,67 @@
+#!/bin/sh
+#
+# iiif-utils launcher.
+#
+# This repository is simultaneously a Python package and an Agent Skill
+# (SKILL.md sits at the root), so the launcher has to work in both
+# shapes:
+#
+#   * a released .skill bundle — read-only, no git, ships a prebuilt
+#     wheel in wheels/. Runs the wheel in an ephemeral uv environment.
+#   * a git checkout — writable, so it can run from source and pick up
+#     local edits.
+#
+# Nothing is installed into the user's home as a persistent tool.
+#
+# Usage:
+#   <root>/scripts/iiif-utils <command> [options]
+#   sh <root>/scripts/iiif-utils <command> [options]   (if +x was lost)
+#
+# Environment:
+#   IIIF_UTILS_REPO   Force running from this checkout instead of the
+#                     bundled wheel.
+#   UV_CACHE_DIR      Standard uv variable. Point it somewhere temporary
+#                     for a zero-home-directory footprint, at the cost
+#                     of re-downloading dependencies each session.
+#
+set -eu
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+die() {
+    echo "iiif-utils: $*" >&2
+    exit 1
+}
+
+command -v uv >/dev/null 2>&1 || die "uv is not installed. See https://docs.astral.sh/uv/"
+
+# Explicit checkout wins, for developing against local edits.
+if [ -n "${IIIF_UTILS_REPO:-}" ]; then
+    [ -f "$IIIF_UTILS_REPO/pyproject.toml" ] \
+        || die "IIIF_UTILS_REPO=$IIIF_UTILS_REPO has no pyproject.toml"
+    exec uv run --project "$IIIF_UTILS_REPO" iiif-utils "$@"
+fi
+
+# Newest wheel wins, so a stale build left behind never shadows a fresh
+# one (versions sort lexically here because they share a common prefix).
+WHEEL=""
+for candidate in "$ROOT"/wheels/iiif_utils-*.whl; do
+    [ -f "$candidate" ] && WHEEL="$candidate"
+done
+
+if [ -n "$WHEEL" ]; then
+    # --no-project is load-bearing: without it, uv adopts the environment
+    # of whatever Python project the current directory happens to be in.
+    exec uv run --no-project --with "$WHEEL" iiif-utils "$@"
+fi
+
+# No wheel: this is a checkout. Running from source needs a WRITABLE
+# tree — uv puts .venv in the project and hatch-vcs writes _version.py
+# back into src/ — which a checkout is and a read-only bundle is not.
+if [ -f "$ROOT/pyproject.toml" ] && [ -w "$ROOT" ]; then
+    exec uv run --project "$ROOT" iiif-utils "$@"
+fi
+
+die "no wheel in $ROOT/wheels/, and $ROOT is not a writable checkout.
+  Build a wheel:           sh $ROOT/scripts/build-wheel.sh
+  Or point at a checkout:  IIIF_UTILS_REPO=/path/to/repo $0 $*"

@@ -1916,3 +1916,29 @@ def test_alto_minimal_parse():
     ill = page.illustrations[0]
     assert ill.illustration_type == "Illustration"
     assert (ill.bbox_x0, ill.bbox_y0, ill.bbox_x1, ill.bbox_y1) == (500, 800, 800, 1200)
+
+
+def test_check_update_version_parsing():
+    from iiif_utils.commands.check_update import parse_version
+    assert parse_version("1.2.3") == ((1, 2, 3), False)
+    assert parse_version("v1.2.3") == ((1, 2, 3), False)
+    # hatch-vcs on an untagged checkout: a dev build OF 0.0.1
+    assert parse_version("0.0.1.dev40+g58296f48") == ((0, 0, 1), True)
+    assert parse_version("nonsense") is None
+
+
+def test_check_update_comparison():
+    """A dev build must read as behind its own release, not ahead."""
+    from iiif_utils.commands.check_update import compare
+    assert compare("1.2.3", "v1.2.3") == "current"
+    assert compare("1.2.3", "v1.3.0") == "behind"
+    assert compare("1.3.0", "v1.2.3") == "ahead"
+    # The case that matters: 0.0.1.devN precedes the 0.0.1 tag
+    assert compare("0.0.1.dev40+g58296f48", "v0.0.1") == "behind"
+    assert compare("0.0.1.dev40+g58296f48", "v0.2.0") == "behind"
+    assert compare("garbage", "v1.0.0") == "unknown"
+
+
+def test_check_update_registered():
+    r = CliRunner().invoke(cli, ["--help"])
+    assert "check-update" in r.output
