@@ -1,6 +1,7 @@
 ---
 name: digitized-books
 description: Use when working with scanned books held by the Internet Archive (archive.org) or a IIIF library — Wellcome Collection, Library of Congress, Gallica (BnF), Munich's MDZ / Bayerische Staatsbibliothek, or Heidelberg. Use to find an edition, search the text inside a specific scanned book, read what a given page says, pull page images or the PDF, crop a figure or plate, or reconstruct multi-column and tabular pages that OCR scrambled. Trigger on archive.org links and identifiers, IIIF manifest URLs, Wellcome b-numbers, LCCNs, and on requests like "what does this atlas say about the femur", "get me page 212", "find where this book discusses X", or "pull that plate as an image" — even when the user never says IIIF, OCR, or names a library. Not for PDFs or images the user already has locally, and not for born-digital publications.
+license: Apache-2.0
 compatibility: Requires uv and Python 3.10+, plus network access to archive.org and the IIIF host. The ocr-page command additionally needs tesseract installed in the OS.
 metadata:
   author: mhalle

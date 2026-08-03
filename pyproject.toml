@@ -7,7 +7,7 @@ name = "iiif-utils"
 dynamic = ["version"]
 description = "CLI tool for indexing and downloading from IIIF digitized collections"
 readme = "README.md"
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
 requires-python = ">=3.10"
 dependencies = [
     "click>=8.1",
