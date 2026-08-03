@@ -62,8 +62,14 @@ jobs:
           cat src/iiif_utils/_version.py
           grep fallback-version pyproject.toml
 
-      - name: Run tests
-        run: uv run --frozen pytest -q
+      - name: Run tests, lint, types
+        run: |
+          # --extra dev is required: without it pytest/ruff/mypy are not
+          # installed and this fails with "Failed to spawn: pytest".
+          uv sync --frozen --extra dev
+          uv run pytest -q
+          uv run ruff check src/ tests/
+          uv run mypy src/
 
       - name: Build and validate the bundle
         run: |

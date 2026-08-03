@@ -110,8 +110,11 @@ The wheel filename in the listing carries the version. If it shows a
 
 ## When it goes wrong
 
-- **Tag pushed at the wrong commit.** Do not move a published tag;
-  consumers may already have it. Cut the next patch version instead.
+- **Tag pushed at the wrong commit.** The invariant is *never move a tag
+  that has a published release* — consumers may already hold those
+  artifacts. A tag whose run failed, so no release exists, has no
+  consumers and may be deleted and re-pushed at a corrected commit. If
+  in doubt, cut the next patch version; it costs nothing.
 - **CI failed after the tag was pushed.** Fix forward, then re-tag at a
   new version. `release.sh` refuses to reuse a tag that exists on origin
   precisely so this stays a decision rather than an accident.
