@@ -18,3 +18,6 @@ the source form instead:
 ```sh
 uv run --project /path/to/iiif iiif-utils <command>
 ```
+
+The launcher (`../bin/iiif-utils`) picks the newest wheel here, so a
+stale build left behind never shadows a fresh one.

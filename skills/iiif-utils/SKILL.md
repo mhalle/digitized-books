@@ -14,45 +14,48 @@ a mixed shelf can be queried uniformly.
 If a task mentions archive.org, an IA identifier, a IIIF manifest URL, a
 Wellcome b-number, or "this scanned book", this is the tool.
 
-## Running it — always this exact form
+## Running it
+
+Always go through the launcher:
 
 ```bash
-uv run --no-project --with "$SKILL_DIR"/wheels/iiif_utils-*.whl iiif-utils <command> [options]
+$SKILL_DIR/bin/iiif-utils <command> [options]
 ```
 
-Substitute the real skill path for `$SKILL_DIR` (a shell variable will
-not be set for you). Both flags are load-bearing:
+Substitute the real skill path for `$SKILL_DIR` — no shell variable is
+set for you. If the executable bit was lost in packaging, `sh
+$SKILL_DIR/bin/iiif-utils ...` works identically.
 
-- **`--no-project`** — without it, running inside any Python project
-  directory makes uv adopt *that* project's environment and the command
-  fails or runs the wrong code.
-- **`--with <wheel>`** — installs the shipped wheel into an ephemeral,
-  cached environment. Nothing is installed into the user's home as a
-  persistent tool, and nothing is written into the skill directory, so
-  this works when the skill is mounted read-only.
+The launcher runs a prebuilt wheel in an ephemeral uv environment.
+Nothing is installed into the user's home as a persistent tool, and
+nothing is written into the skill directory, so it works when the skill
+is mounted read-only. Warm invocations cost ~0.5s; the first use in a
+session pays a one-off dependency resolve.
 
-Do **not** use `uv tool install`, `uvx`, `pip install`, or
-`uv run --project <skill-dir>`. The last one fails outright on a
-read-only skill directory: uv writes `.venv` into the project, and
-hatch-vcs's build hook writes `_version.py` back into the source tree.
+Do **not** hand-roll the underlying command, and do not use
+`uv tool install`, `uvx`, `pip install`, or `uv run --project
+<skill-dir>`. The last fails outright on a read-only skill directory —
+uv writes `.venv` into the project, and hatch-vcs's build hook writes
+`_version.py` back into the source tree.
 
-Warm invocations cost ~0.5s. First use in a session pays a one-off
-dependency resolve.
-
-**If `wheels/` is empty** (wheels aren't committed — the version string
-embeds a git hash, so they'd churn history), build it once:
+**If `wheels/` is empty** (wheels aren't committed — the version embeds
+a git hash, so they'd churn history), build one:
 
 ```bash
-sh "$SKILL_DIR"/scripts/build-wheel.sh /path/to/iiif
+sh $SKILL_DIR/scripts/build-wheel.sh /path/to/iiif
 ```
 
-**Working on the iiif repo itself?** Use the checkout directly, so you
-exercise your edits rather than the shipped wheel. This form needs a
-writable tree, which a checkout is:
+**Working on the iiif repo itself?** Point the launcher at your
+checkout so you exercise your edits rather than the shipped wheel:
 
 ```bash
-uv run --project /path/to/iiif iiif-utils <command>
+IIIF_UTILS_REPO=/path/to/iiif $SKILL_DIR/bin/iiif-utils <command>
 ```
+
+Permissions note: the launcher does not start with `uv run`, so an
+allowlist entry matching `uv run *` will not cover it. Allow
+`Bash(*/skills/iiif-utils/bin/iiif-utils *)` (or the absolute path) if
+invocations prompt.
 
 ## Addressing a page: leaf vs printed page
 

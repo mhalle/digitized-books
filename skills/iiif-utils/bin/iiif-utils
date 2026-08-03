@@ -1,0 +1,55 @@
+#!/bin/sh
+#
+# iiif-utils launcher for the skill.
+#
+# Runs the shipped wheel in an ephemeral uv environment. Nothing is
+# installed into the user's home as a persistent tool, and nothing is
+# written into the skill directory — so this works when the skill is
+# mounted read-only.
+#
+# Usage:
+#   <skill>/bin/iiif-utils <command> [options]
+#   sh <skill>/bin/iiif-utils <command> [options]   (if +x was lost)
+#
+# Environment:
+#   IIIF_UTILS_REPO   Path to an iiif checkout. When set, runs from
+#                     source instead of the wheel — use while developing
+#                     so you exercise your edits.
+#   UV_CACHE_DIR      Standard uv variable. Point it somewhere temporary
+#                     for a zero-home-directory footprint, at the cost
+#                     of re-downloading dependencies each session.
+#
+set -eu
+
+SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+die() {
+    echo "iiif-utils: $*" >&2
+    exit 1
+}
+
+command -v uv >/dev/null 2>&1 || die "uv is not installed. See https://docs.astral.sh/uv/"
+
+# Development mode: run from a checkout. Needs a writable tree (uv puts
+# .venv in the project and hatch-vcs writes _version.py into the source),
+# which a checkout is and a read-only skill mount is not.
+if [ -n "${IIIF_UTILS_REPO:-}" ]; then
+    [ -f "$IIIF_UTILS_REPO/pyproject.toml" ] \
+        || die "IIIF_UTILS_REPO=$IIIF_UTILS_REPO has no pyproject.toml"
+    exec uv run --project "$IIIF_UTILS_REPO" iiif-utils "$@"
+fi
+
+# Newest wheel wins, so a stale build left behind never shadows a fresh
+# one (versions sort lexically here because they share a 0.0.1.devN prefix).
+WHEEL=""
+for candidate in "$SKILL_DIR"/wheels/iiif_utils-*.whl; do
+    [ -f "$candidate" ] && WHEEL="$candidate"
+done
+
+[ -n "$WHEEL" ] || die "no wheel in $SKILL_DIR/wheels/.
+  Build one:  sh $SKILL_DIR/scripts/build-wheel.sh /path/to/iiif
+  Or run from a checkout:  IIIF_UTILS_REPO=/path/to/iiif $0 $*"
+
+# --no-project is load-bearing: without it, uv adopts the environment of
+# whatever Python project the current directory happens to sit in.
+exec uv run --no-project --with "$WHEEL" iiif-utils "$@"
