@@ -5,6 +5,23 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-08-03
+
+### Fixed
+
+- The 0.1.0 release bundle shipped a wheel stamped
+  `0.1.1.dev0+gbaef62c2e.d20260803` rather than `0.1.0`. The release
+  workflow patched `pyproject.toml`'s `fallback-version` — a tracked
+  file — before building, so the tree was dirty and `hatch-vcs` marked
+  the build accordingly. Version pinning now happens on the staged
+  bundle copy after the wheel is built from a pristine tree, and the
+  pinned value is read back from the wheel so the two cannot disagree.
+- CI installed no dev dependencies (`uv run --frozen pytest` omits the
+  `dev` extra), so the 0.1.0 run failed before it could publish. CI now
+  syncs with `--extra dev` and runs ruff and mypy alongside the tests.
+
+Use this release rather than 0.1.0.
+
 ## [0.1.0] - 2026-08-03
 
 First release. The CLI is `iiif-utils`; the Agent Skill is
@@ -109,4 +126,5 @@ simultaneously a Python package and a skill.
   geometry, since `ia-utils` never stored them. Both limits are recorded
   in the migrated index's `index_metadata`.
 
+[0.1.1]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.1
 [0.1.0]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.0
