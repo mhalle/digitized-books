@@ -52,44 +52,20 @@ jobs:
       - name: Run tests
         run: uv run --frozen pytest -q
 
-      - name: Build the wheel into the bundle
+      - name: Build and validate the bundle
         run: |
-          # The launcher prefers this wheel, which is what makes the
-          # bundle work when it is mounted read-only: no build backend,
-          # no git, and nothing written into the skill directory.
-          rm -f wheels/*.whl
-          uv build --wheel -o wheels
-          ls -l wheels/
+          # Same script used for local builds, so the released artifact
+          # is identical to one you can test by hand — and there is only
+          # one exclusion list to keep correct.
+          sh scripts/build-skill.sh "$GITHUB_WORKSPACE/dist"
 
-      - name: Validate the skill
-        run: |
-          # Validate under the real bundle directory name — the spec
-          # requires it to match SKILL.md's `name`.
-          mkdir -p "/tmp/stage/${SKILL_NAME}"
-          rsync -a --exclude='.git' --exclude='.github' --exclude='.venv' \
-                   --exclude='.pytest_cache' --exclude='.mypy_cache' \
-                   --exclude='.ruff_cache' --exclude='__pycache__' \
-                   --exclude='*.pyc' --exclude='.DS_Store' \
-                   --exclude='*.sqlite' --exclude='.iiif-cache' \
-                   . "/tmp/stage/${SKILL_NAME}/"
-          uvx --from skills-ref agentskills validate "/tmp/stage/${SKILL_NAME}"
-
-      - name: Smoke-test the bundle read-only
-        run: |
-          # Exactly how a user runs it: read-only, no git, no checkout.
-          chmod -R a-w "/tmp/stage/${SKILL_NAME}"
-          "/tmp/stage/${SKILL_NAME}/scripts/iiif-utils" --version
-          chmod -R u+w "/tmp/stage/${SKILL_NAME}"
-
-      - name: Package
+      - name: Name the release artifacts
         run: |
           VERSION="${{ steps.info.outputs.VERSION }}"
-          cd /tmp/stage
-          zip -qr "$GITHUB_WORKSPACE/${SKILL_NAME}-${VERSION}.zip" "${SKILL_NAME}"
-          cd "$GITHUB_WORKSPACE"
-          cp "${SKILL_NAME}-${VERSION}.zip" "${SKILL_NAME}-${VERSION}.skill"
-          cp "${SKILL_NAME}-${VERSION}.zip" "${SKILL_NAME}.zip"
-          cp "${SKILL_NAME}-${VERSION}.zip" "${SKILL_NAME}.skill"
+          cp "dist/${SKILL_NAME}.skill" "${SKILL_NAME}-${VERSION}.skill"
+          cp "dist/${SKILL_NAME}.skill" "${SKILL_NAME}-${VERSION}.zip"
+          cp "dist/${SKILL_NAME}.skill" "${SKILL_NAME}.zip"
+          cp "dist/${SKILL_NAME}.skill" "${SKILL_NAME}.skill"
           ls -l ${SKILL_NAME}*
 
       - name: Create GitHub Release
