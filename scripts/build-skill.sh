@@ -56,10 +56,33 @@ uv build --wheel --project "$ROOT" -o "$STAGE/$SKILL_NAME/wheels" >/dev/null
 # hatch-vcs writes _version.py into the SOURCE tree as a build
 # side-effect. It is gitignored, so it survives — and because runtime
 # prefers it, a stale copy reports a version that was true for a tree
-# state that no longer exists. The wheel already carries its own, so
-# delete the source-tree one rather than leaving a liar behind.
-rm -f "$ROOT/src/iiif_utils/_version.py" \
-      "$STAGE/$SKILL_NAME/src/iiif_utils/_version.py"
+# state that no longer exists. Delete it rather than leaving a liar
+# behind; the wheel carries its own.
+rm -f "$ROOT/src/iiif_utils/_version.py"
+
+# Pin the resolved version into the STAGED copy, never the repo.
+#
+# The bundle has no .git, so anyone running `uv run --project` against
+# an unpacked copy would otherwise get pyproject's fallback-version.
+# Doing this to the real tree — as an earlier version of the release
+# workflow did — modifies a TRACKED file, which makes hatch-vcs mark
+# the build dirty and stamp `.dYYYYMMDD` onto the very wheel this is
+# meant to support. The staged tree is not a git tree, so pinning here
+# costs nothing.
+VERSION="$(basename "$STAGE/$SKILL_NAME"/wheels/iiif_utils-*.whl \
+    | sed -E 's/^iiif_utils-(.+)-py3-none-any\.whl$/\1/')"
+[ -n "$VERSION" ] || { echo "could not read version from wheel" >&2; exit 1; }
+echo "pinning bundle version $VERSION"
+
+printf '%s\n' \
+    "# Written by scripts/build-skill.sh from the built wheel." \
+    "# The bundle is immutable, so this cannot go stale." \
+    "__version__ = version = \"$VERSION\"" \
+    > "$STAGE/$SKILL_NAME/src/iiif_utils/_version.py"
+
+sed -e "s/^fallback-version = .*/fallback-version = \"$VERSION\"/" \
+    "$STAGE/$SKILL_NAME/pyproject.toml" > "$STAGE/pyproject.tmp"
+mv "$STAGE/pyproject.tmp" "$STAGE/$SKILL_NAME/pyproject.toml"
 
 # Validate under the real bundle directory name — the Agent Skills spec
 # requires it to equal SKILL.md's `name`, and that can only be checked
