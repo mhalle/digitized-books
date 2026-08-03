@@ -64,19 +64,11 @@ jobs:
 
       - name: Name the release artifacts
         run: |
-          # build-skill.sh also emits one archive per sibling skill under
-          # skills/ — a .skill archive must contain exactly one SKILL.md,
-          # so they cannot ride inside the main bundle.
           VERSION="${{ steps.info.outputs.VERSION }}"
           cp "dist/${SKILL_NAME}.skill" "${SKILL_NAME}-${VERSION}.skill"
           cp "dist/${SKILL_NAME}.skill" "${SKILL_NAME}-${VERSION}.zip"
           cp "dist/${SKILL_NAME}.skill" "${SKILL_NAME}.zip"
           cp "dist/${SKILL_NAME}.skill" "${SKILL_NAME}.skill"
-          for f in dist/*.skill; do
-            n="$(basename "$f" .skill)"
-            [ "$n" = "${SKILL_NAME}" ] && continue
-            cp "$f" "${n}.skill"
-          done
           ls -l *.skill *.zip
 
       - name: Create GitHub Release
@@ -88,4 +80,3 @@ jobs:
             ${{ env.SKILL_NAME }}-${{ steps.info.outputs.VERSION }}.skill
             ${{ env.SKILL_NAME }}.zip
             ${{ env.SKILL_NAME }}.skill
-            build-outline.skill

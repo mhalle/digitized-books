@@ -5,6 +5,25 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-08-03
+
+### Changed
+
+- **Outline-building is now part of this skill** rather than a separate
+  `build-outline.skill` to install alongside it. Populating
+  `derived_outline` is core to what this tool is for, so needing a second
+  install was wrong.
+
+  It ships as `references/building-outlines.md`, loaded on demand — the
+  spec's progressive-disclosure mechanism, which is what lets one archive
+  carry the instructions without a second `SKILL.md`. `SKILL.md` says
+  explicitly when to read it. The three supporting references and
+  `scripts/resolve_outline.py` (stdlib-only) come with it.
+
+  Internal paths were repo-relative (`skills/build-outline/scripts/...`)
+  and would have broken once bundled; they are now skill-root-relative
+  and verified to resolve inside the archive.
+
 ## [0.1.3] - 2026-08-03
 
 ### Changed
@@ -169,6 +188,7 @@ simultaneously a Python package and a skill.
   geometry, since `ia-utils` never stored them. Both limits are recorded
   in the migrated index's `index_metadata`.
 
+[0.1.4]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.4
 [0.1.3]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.3
 [0.1.2]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.2
 [0.1.1]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.1

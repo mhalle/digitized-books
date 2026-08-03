@@ -56,8 +56,8 @@ checkout it runs from source instead, so edits take effect immediately.
 | `docs/OUTLINE.md` | The `derived_outline` navigation schema. |
 | `docs/WELLCOME_NOTES.md` | Field notes on Wellcome's APIs. |
 | `src/iiif_utils/` | The package. |
-| `scripts/` | `iiif-utils` launcher, skill/wheel builders, `release.sh`. |
-| `skills/build-outline/` | A separate skill for transcribing printed TOCs. |
+| `references/` | Loaded on demand by the skill; outline-building lives here. |
+| `scripts/` | `iiif-utils` launcher, `build-skill.sh`, `release.sh`, `resolve_outline.py`. |
 
 The corpus catalogue and recon experiments moved to the sibling
 `medical-library` repository; this one is tooling.

@@ -1,9 +1,7 @@
----
-name: build-outline
-description: Populate the derived_outline table for an iiif-utils sqlite index by transcribing the printed Table of Contents. Use whenever the user wants to outline a book, build a TOC for a digitized work, populate or fix a derived_outline, run outline-import end-to-end, or asks something like "build an outline for <work>" / "give this book a TOC in the db" / "set up navigation for this scan". Triggers on any iiif-utils sqlite index that doesn't have an outline yet (check with outline-status) and has a parseable printed TOC. Triggers across English / French / German / other European-language works.
----
+# Building a navigation outline
 
-# build-outline
+Loaded on demand from `SKILL.md`. Transcribe a book's printed table
+of contents and populate its `derived_outline` table.
 
 Given an `iiif-utils` sqlite index for a digitized work (textbook, atlas,
 monograph), find the printed Table of Contents, transcribe it from the
@@ -46,10 +44,10 @@ prior work.
 This repo manages its environment with **uv**. Every Bash invocation
 in this skill must go through `uv run`:
 
-- `uv run iiif-utils <subcommand> ...` — NOT `iiif-utils ...` or
+- `iiif-utils <subcommand> ...` — NOT `iiif-utils ...` or
   `.venv/bin/iiif-utils ...`
 - `uv run python3 ...` — NOT bare `python3 ...` or `.venv/bin/python ...`
-- `uv run python3 skills/build-outline/scripts/resolve_outline.py ...`
+- `uv run --no-project python3 scripts/resolve_outline.py ...`
 
 The repo's permissions allowlist matches the `uv run *` pattern.
 Direct invocations of `.venv/bin/*` or bare `python3 <script>`
@@ -61,7 +59,7 @@ first thing to try is wrapping it in `uv run`.
 ### 1. Confirm the target needs an outline
 
 ```bash
-uv run iiif-utils outline-status <db_path>
+iiif-utils outline-status <db_path>
 ```
 
 If `outline_rows` is non-zero, the work already has an outline. Confirm
@@ -126,7 +124,7 @@ fetching and reading.
 ### 4. Fetch the TOC images at 1600 px
 
 ```bash
-uv run iiif-utils get-pages -i <db_path> --leaves <start>-<end> \
+iiif-utils get-pages -i <db_path> --leaves <start>-<end> \
     --size '!1600,1600' --prefix experiments/<short>_toc/toc_pages/page
 ```
 
@@ -342,7 +340,7 @@ pagination can't be located on a canvas via the standard resolver.
 ### 6. Resolve to the nested payload
 
 ```bash
-uv run python3 skills/build-outline/scripts/resolve_outline.py \
+uv run --no-project python3 scripts/resolve_outline.py \
     <db_path> experiments/<short>_toc/flat.json \
     -o experiments/<short>_toc/outline_payload.json
 ```
@@ -364,7 +362,7 @@ You don't need to write any of this yourself.
 ### 7. Import
 
 ```bash
-uv run iiif-utils outline-import <db_path> \
+iiif-utils outline-import <db_path> \
     experiments/<short>_toc/outline_payload.json
 ```
 
@@ -375,7 +373,7 @@ specific entries — fix the flat JSON, re-run step 6, re-import with
 ### 8. Verify
 
 ```bash
-uv run iiif-utils outline-list <db_path> | head -50
+iiif-utils outline-list <db_path> | head -50
 ```
 
 Spot-check:
@@ -404,7 +402,7 @@ section structure. Every synthesized entry is flagged with `notes:
 "synthesized from body-text running headers; not in printed TOC"` so
 the artifacts stay auditable.
 
-See [references/body_header_fallback.md](references/body_header_fallback.md)
+See [references/outline-body-header-fallback.md](outline-body-header-fallback.md)
 for the SQL query, the trace-transitions procedure, and a worked
 example (Quain *Elements of Anatomy* 1908 vol 1, 68→112 entries via
 this technique). **Use only when the printed TOC alone really would
@@ -422,7 +420,7 @@ for Spalteholz Vol 1) becomes a per-figure outline (164 entries) by
 mining `text_blocks` for the `^N. Title` pattern and inserting each
 figure as a child of its containing section.
 
-See [references/figure_caption_extraction.md](references/figure_caption_extraction.md)
+See [references/outline-figure-captions.md](outline-figure-captions.md)
 for the regex, the deduplication and parent-assignment procedure, and
 the worked Spalteholz Vol 1 example.
 
@@ -471,7 +469,7 @@ This skill **does not** apply to:
 
 ## References
 
-See [references/examples.md](references/examples.md) for pointers
+See [references/outline-examples.md](outline-examples.md) for pointers
 to four working flat-JSON inputs (Ranson, Cunningham, Bourgery,
 Rauber-Kopsch) corresponding to four already-imported outlines.
 Reading them is the fastest way to calibrate what a complete

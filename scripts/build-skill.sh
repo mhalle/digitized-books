@@ -38,15 +38,20 @@ mkdir -p "$BUNDLE/scripts" "$BUNDLE/wheels" "$OUT_DIR"
 
 # --- everything that ships, and nothing else ---------------------------
 #
-#   SKILL.md            the skill itself
-#   LICENSE             Apache-2.0 §4(a) requires it accompany the work
-#   CHANGELOG.md        what is in this version, for a reader
-#   scripts/iiif-utils  the launcher; the only executable a user runs
-#   wheels/*.whl        the code (built below)
+#   SKILL.md                the skill itself
+#   LICENSE                 Apache-2.0 §4(a) requires it accompany the work
+#   CHANGELOG.md            what is in this version, for a reader
+#   references/*.md         loaded on demand; outline-building lives here
+#   scripts/iiif-utils      the launcher; the executable a user runs
+#   scripts/resolve_outline.py  used by the outline workflow (stdlib only)
+#   wheels/*.whl            the code (built below)
 #
 echo "staging $SKILL_NAME"
+mkdir -p "$BUNDLE/references"
 cp "$ROOT/SKILL.md" "$ROOT/LICENSE" "$ROOT/CHANGELOG.md" "$BUNDLE/"
-cp "$ROOT/scripts/iiif-utils" "$BUNDLE/scripts/"
+cp "$ROOT"/references/*.md "$BUNDLE/references/"
+cp "$ROOT/scripts/iiif-utils" "$ROOT/scripts/resolve_outline.py" \
+   "$BUNDLE/scripts/"
 chmod +x "$BUNDLE/scripts/iiif-utils"
 
 # The wheel carries the version hatch-vcs resolved from git, so it is
@@ -95,20 +100,3 @@ OUT="$OUT_DIR/$SKILL_NAME.skill"
 rm -f "$OUT"
 ( cd "$STAGE" && zip -qr "$OUT" "$SKILL_NAME" )
 echo "built $OUT ($(du -h "$OUT" | cut -f1))"
-
-# --- sibling skills ----------------------------------------------------
-# A .skill archive holds exactly one skill, so anything under skills/
-# ships as its own archive. These are instruction-only — no package, no
-# wheel — so the whole directory is the skill.
-for skill_dir in "$ROOT"/skills/*/; do
-    [ -f "${skill_dir}SKILL.md" ] || continue
-    name="$(basename "$skill_dir")"
-    rm -rf "${STAGE:?}/sib"
-    mkdir -p "$STAGE/sib/$name"
-    rsync -a --exclude='__pycache__' --exclude='*.pyc' \
-             --exclude='.DS_Store' "$skill_dir" "$STAGE/sib/$name/"
-    uvx --from skills-ref agentskills validate "$STAGE/sib/$name" >/dev/null
-    rm -f "$OUT_DIR/$name.skill"
-    ( cd "$STAGE/sib" && zip -qr "$OUT_DIR/$name.skill" "$name" )
-    echo "built $OUT_DIR/$name.skill ($(du -h "$OUT_DIR/$name.skill" | cut -f1))"
-done

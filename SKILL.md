@@ -167,6 +167,30 @@ verdict.
 Layout modes need `page_words`, which older indexes lack — add it with
 `rebuild-index --refetch`.
 
+## Building a navigation outline
+
+`derived_outline` gives a book a table of contents you can navigate by —
+`outline-list`, and `-b/--book` lookups that resolve chapter to canvas.
+Populating it is a vision task, not a CLI one: the printed TOC has to be
+read off the page images and turned into structured entries.
+
+**When the user asks to outline a work, build a TOC for a book, populate
+or fix a `derived_outline`, or set up navigation for a scan — read
+[references/building-outlines.md](references/building-outlines.md)
+and follow it.** Check first with `outline-status <db>`; a book that
+already has an outline needs nothing.
+
+That reference covers finding the TOC pages, transcribing them across
+languages, the page→canvas resolution script
+(`scripts/resolve_outline.py`), and when to bail out (plate-only atlases
+with no printed TOC). It also points at three further references for the
+harder cases: books whose TOC must be reconstructed from body headers,
+figure-caption extraction, and worked examples.
+
+Don't try to do this from memory — the failure modes (off-by-one canvas
+ranges, invented entries, mis-nested levels) are exactly what the
+reference exists to prevent.
+
 ## Internet Archive specifics
 
 - Pass a URL (`https://archive.org/details/<id>`), or a bare identifier
