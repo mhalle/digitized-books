@@ -185,10 +185,23 @@ def ocr_page(index: Path, leaf_num: int | None, book: str | None,
     # region syntax `x,y,w,h` consumes exactly those coords.
     aliases = {"small": "400,", "medium": "800,", "large": "1600,"}
     iiif_size = aliases.get(size, size)
-    url = image_api.region_url(pn["image_service_url"], bbox,
-                                 size=iiif_size, fmt="jpg")
 
     cfg = load_config(config_path)
+    # Default `full` is rejected outright by some servers (IA answers 400
+    # on it for large scans), and any explicit width above the source is
+    # an upscale they need not serve. Bound it like the other image
+    # commands — OCR from a downsampled crop is worse than a small wait.
+    nat_w, nat_h = image_api.resolve_dims(pn, cfg_http=cfg.get("http", {}))
+    if bbox:
+        iiif_size = image_api.clamp_size_to_native(
+            iiif_size, int(bbox[2]) - int(bbox[0]),
+            int(bbox[3]) - int(bbox[1]))
+    else:
+        if iiif_size == "full" and nat_w:
+            iiif_size = f"{nat_w},"
+        iiif_size = image_api.clamp_size_to_native(iiif_size, nat_w, nat_h)
+    url = image_api.region_url(pn["image_service_url"], bbox,
+                                 size=iiif_size, fmt="jpg")
     img_bytes = http_.fetch_bytes(url, cfg_http=cfg.get("http", {}))
     img = Image.open(io.BytesIO(img_bytes))
 

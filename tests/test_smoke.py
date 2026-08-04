@@ -2127,3 +2127,25 @@ def test_figure_commands_explain_when_there_are_no_illustrations(tmp_path):
         assert "no illustrations" in r.output
         assert "search-index" in r.output, "should point at caption search"
         assert "Traceback" not in r.output
+
+
+def test_fts_quotes_punctuated_terms():
+    """FTS5 treats punctuation as syntax; scanned corpora are full of it."""
+    from iiif_utils.commands.search_index import _massage
+    assert _massage("Fig. 591", False) == '"Fig." 591'
+    assert _massage("b.'92", False) == '''"b.'92"'''
+    assert _massage("U.S. Army", False) == '"U.S." Army'
+    # Operators and existing quoting survive
+    assert _massage('lymph AND "Fig. 591"', False) == 'lymph AND "Fig. 591"'
+    assert _massage("portal vein", False) == "portal vein"
+    # Wildcards are FTS5 syntax, not punctuation to escape
+    assert _massage("lymph*", False) == "lymph*"
+    # --raw is verbatim
+    assert _massage("Fig. 591", True) == "Fig. 591"
+
+
+def test_get_region_has_the_image_options():
+    r = CliRunner().invoke(cli, ["get-region", "--help"])
+    for flag in ("--autocontrast", "--cutoff", "--preserve-tone",
+                  "--quality"):
+        assert flag in r.output, flag
