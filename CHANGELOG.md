@@ -5,6 +5,31 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.8] - 2026-08-03
+
+### Fixed
+
+- `list-figures` and `get-figure` crashed with a raw
+  `sqlite3.OperationalError: no such table: illustrations` on any index
+  built from hOCR or DjVu. The table is only created when there is
+  something to put in it, and neither format has an Illustration
+  element — so every Internet Archive index hits this. Both commands now
+  explain that it is the source's limitation and point at the caption
+  search that does work.
+
+### Added
+
+- `get-region --bbox` accepts percentages (`10%,20%,60%,80%`) and
+  fractions (`0.1,0.2,0.6,0.8`) as well as pixels. Isolating a plate
+  previously meant eyeballing proportions off a full-page image and
+  converting against the page size by hand. Relative forms resolve
+  against the canvas's own dimensions, and raise rather than guess when
+  those are unknown.
+
+- `SKILL.md` documents the figure-finding path for sources without
+  structured illustrations: caption search with `--blocks` gives a bbox
+  per match that feeds straight into `get-region`.
+
 ## [0.1.7] - 2026-08-03
 
 ### Added
@@ -259,6 +284,7 @@ simultaneously a Python package and a skill.
   geometry, since `ia-utils` never stored them. Both limits are recorded
   in the migrated index's `index_metadata`.
 
+[0.1.8]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.8
 [0.1.7]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.7
 [0.1.6]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.6
 [0.1.5]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.5

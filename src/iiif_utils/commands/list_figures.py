@@ -13,6 +13,23 @@ from iiif_utils.utils import output as output_
 from iiif_utils.utils.page import page_ref
 
 
+NO_FIGURES = """This index records no illustrations.
+
+Only ALTO marks figures as structured regions. Internet Archive items
+are indexed from hOCR or DjVu, which have no Illustration element, so
+`illustrations` is empty (or absent) for every IA-sourced book — this
+is the source's limitation, not a failed index.
+
+To find a plate anyway, search its caption, which OCR does capture:
+
+    iiif-utils search-index -i {index} -q '"Fig. 591"'
+    iiif-utils search-index -i {index} -q 'Fig portal vein' --blocks
+
+`--blocks` gives each match a bbox you can hand straight to
+`get-region`. `get-page-stats --figures` narrows candidates by page
+density, but it is a heuristic and does miss plates."""
+
+
 @click.command(name="list-figures")
 @click.option("-i", "--index", required=True,
               type=click.Path(exists=True, path_type=Path))
@@ -51,6 +68,8 @@ def list_figures(index: Path, leaf_num: int | None, all_pages: bool,
         params = (leaf_num,)
     sql += " ORDER BY i.page_id, i.illustration_number"
 
+    if not _has_illustrations(conn):
+        raise click.ClickException(NO_FIGURES.format(index=index))
     db_rows = list(conn.execute(sql, params))
     if not db_rows:
         click.echo("No illustrations found.", err=True)
@@ -80,3 +99,17 @@ def list_figures(index: Path, leaf_num: int | None, all_pages: bool,
         })
 
     output_.write_records(out_rows, fmt=fmt)
+
+
+def _has_illustrations(conn: sqlite3.Connection) -> bool:
+    """True when the index has an illustrations table with rows in it.
+
+    The table is only created when there is something to put in it, so
+    an IA-sourced index has no table at all rather than an empty one —
+    querying it raised a bare OperationalError.
+    """
+    try:
+        return bool(conn.execute(
+            "SELECT 1 FROM illustrations LIMIT 1").fetchone())
+    except sqlite3.Error:
+        return False

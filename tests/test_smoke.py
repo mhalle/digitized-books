@@ -2089,3 +2089,41 @@ def test_get_page_source_rejects_non_ia(tmp_path):
                                   "--source", "bookreader", "--url-only"])
     assert r.exit_code != 0
     assert "Internet Archive only" in r.output
+
+
+def test_parse_bbox_spec_pixels_percent_fraction():
+    from iiif_utils.core.image_api import parse_bbox_spec as pb
+    # Pixels pass through
+    assert pb("10,20,110,220", 2325, 3728) == (10, 20, 110, 220)
+    # Percent and fraction resolve to the same pixels
+    assert pb("8%,12%,92%,72%", 2325, 3728) == pb("0.08,0.12,0.92,0.72",
+                                                   2325, 3728)
+    assert pb("50%,50%,100%,100%", 1000, 2000) == (500, 1000, 1000, 2000)
+    import pytest
+    # Relative without page dims cannot be resolved — say so, don't guess
+    with pytest.raises(ValueError, match="page size"):
+        pb("10%,10%,90%,90%", None, None)
+    with pytest.raises(ValueError, match="four"):
+        pb("1,2,3", 100, 100)
+
+
+def test_figure_commands_explain_when_there_are_no_illustrations(tmp_path):
+    """hOCR/DjVu have no Illustration element, so IA indexes have no
+    illustrations table at all — this used to be a raw OperationalError."""
+    import sqlite3 as _sql
+    idx = tmp_path / "nofig.sqlite"
+    c = _sql.connect(idx)
+    c.execute("CREATE TABLE page_numbers (leaf_num INTEGER PRIMARY KEY, "
+              "book_page_number TEXT, image_service_url TEXT, "
+              "image_width INT, image_height INT, width INT, height INT)")
+    c.execute("INSERT INTO page_numbers VALUES (0,'1','https://x/s',10,10,10,10)")
+    c.commit()
+    c.close()
+    for args in (["list-figures", "-i", str(idx), "--all"],
+                  ["get-figure", "-i", str(idx), "-l", "0", "-n", "0",
+                   "--url-only"]):
+        r = CliRunner().invoke(cli, args)
+        assert r.exit_code != 0
+        assert "no illustrations" in r.output
+        assert "search-index" in r.output, "should point at caption search"
+        assert "Traceback" not in r.output

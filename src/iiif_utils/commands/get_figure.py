@@ -12,6 +12,23 @@ from iiif_utils.core import image_api
 from iiif_utils.utils.page import resolve_leaf
 
 
+NO_FIGURES = """This index records no illustrations.
+
+Only ALTO marks figures as structured regions. Internet Archive items
+are indexed from hOCR or DjVu, which have no Illustration element, so
+`illustrations` is empty (or absent) for every IA-sourced book — this
+is the source's limitation, not a failed index.
+
+To find a plate anyway, search its caption, which OCR does capture:
+
+    iiif-utils search-index -i {index} -q '"Fig. 591"'
+    iiif-utils search-index -i {index} -q 'Fig portal vein' --blocks
+
+`--blocks` gives each match a bbox you can hand straight to
+`get-region`. `get-page-stats --figures` narrows candidates by page
+density, but it is a heuristic and does miss plates."""
+
+
 @click.command(name="get-figure")
 @click.option("-i", "--index", required=True,
               type=click.Path(exists=True, path_type=Path))
@@ -49,6 +66,10 @@ def get_figure(index: Path, leaf_num: int | None, book: str | None,
     conn = sqlite3.connect(f"file:{index}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     leaf_num = resolve_leaf(conn, leaf_num, book)
+    try:
+        conn.execute("SELECT 1 FROM illustrations LIMIT 1").fetchone()
+    except sqlite3.Error as e:
+        raise click.ClickException(NO_FIGURES.format(index=index)) from e
     row = conn.execute("""
         SELECT
             i.bbox_x0, i.bbox_y0, i.bbox_x1, i.bbox_y1,

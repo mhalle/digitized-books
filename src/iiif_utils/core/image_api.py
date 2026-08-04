@@ -114,6 +114,54 @@ def resolve_max_size(
     return f"{w},"
 
 
+def parse_bbox_spec(spec: str, page_w: int | None,
+                     page_h: int | None) -> tuple[int, int, int, int]:
+    """Parse `--bbox` as pixels, percentages, or fractions.
+
+    Pixels are exact but require knowing the page size and doing the
+    arithmetic by hand, which is how you end up eyeballing proportions
+    off a full-page image and iterating to trim stray text. Percentages
+    and fractions say what you mean:
+
+        2325,1200,4650,2400     pixels
+        10%,20%,60%,80%         percent of page width/height
+        0.1,0.2,0.6,0.8         fractions (any value <= 1 with a dot)
+
+    Percent and fraction forms need the page dimensions; without them
+    there is nothing to resolve against, so this raises rather than
+    guessing.
+    """
+    parts = [p.strip() for p in spec.split(",")]
+    if len(parts) != 4:
+        raise ValueError("bbox must have four comma-separated values")
+
+    relative = any(p.endswith("%") for p in parts) or all(
+        ("." in p and abs(float(p)) <= 1.0) for p in parts
+        if _is_number(p))
+    if not relative:
+        return (int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3]))
+
+    if not page_w or not page_h:
+        raise ValueError(
+            "relative bbox needs the page size, which this index does not "
+            "record for that canvas — use pixel coordinates")
+
+    out: list[int] = []
+    for i, p in enumerate(parts):
+        axis = page_w if i % 2 == 0 else page_h
+        val = float(p[:-1]) / 100.0 if p.endswith("%") else float(p)
+        out.append(int(round(val * axis)))
+    return (out[0], out[1], out[2], out[3])
+
+
+def _is_number(text: str) -> bool:
+    try:
+        float(text.rstrip("%"))
+        return True
+    except ValueError:
+        return False
+
+
 def clamp_size_to_native(size: str, avail_w: int | None,
                           avail_h: int | None) -> str:
     """Reduce a IIIF size string so it never asks for an upscale.

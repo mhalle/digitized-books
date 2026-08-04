@@ -20,7 +20,11 @@ from iiif_utils.utils.page import resolve_leaf
 @click.option("-b", "--book", default=None,
               help="Printed page number (looks up via page_numbers).")
 @click.option("--bbox", "bbox_str", required=True,
-              help="Region as 'x0,y0,x1,y1' (image pixels).")
+              help="Region as 'x0,y0,x1,y1'. Pixels ('120,300,900,1400'), "
+                   "percentages ('10%,20%,60%,80%'), or fractions "
+                   "('0.1,0.2,0.6,0.8'). Relative forms resolve against "
+                   "the page size, so you don't have to do the "
+                   "arithmetic by hand.")
 @click.option("-o", "--output", "output_path",
               type=click.Path(dir_okay=False, path_type=Path), default=None)
 @click.option("--padding", default=None,
@@ -37,14 +41,8 @@ def get_region(index: Path, leaf_num: int | None, book: str | None,
                 size: str, fmt: str, url_only: bool,
                 config_path: Path | None) -> None:
     """Download (or emit a URL for) an arbitrary bbox on a canvas."""
-    parts = bbox_str.split(",")
-    if len(parts) != 4:
-        raise click.UsageError("--bbox must be 'x0,y0,x1,y1'.")
-    try:
-        bbox = tuple(int(p) for p in parts)
-    except ValueError as e:
-        raise click.UsageError(f"--bbox parse error: {e}") from e
-
+    # --bbox is parsed after the canvas row is read, not here: relative
+    # forms resolve against that canvas's dimensions.
     cfg = load_config(config_path)
     conn = sqlite3.connect(f"file:{index}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
@@ -59,12 +57,20 @@ def get_region(index: Path, leaf_num: int | None, book: str | None,
             f"Canvas {leaf_num} has no image_service_url."
         )
 
+    # Parsed here rather than up front: percentages and fractions resolve
+    # against this canvas's dimensions, which only the row knows.
+    cache_dir = Path(cfg.get("http", {}).get(
+        "cache_dir", "./.iiif-cache")).expanduser()
+    page_w, page_h = image_api.resolve_dims(
+        row, cfg_http=cfg.get("http", {}), cache_dir=cache_dir)
+    try:
+        bbox = image_api.parse_bbox_spec(bbox_str, page_w, page_h)
+    except ValueError as e:
+        raise click.UsageError(f"--bbox: {e}") from e
+
     if padding:
-        cache_dir = Path(cfg.get("http", {}).get(
-            "cache_dir", "./.iiif-cache")).expanduser()
-        cw, ch = image_api.resolve_dims(row, cfg_http=cfg.get("http", {}),
-                                          cache_dir=cache_dir)
-        bbox = image_api.padded_bbox(bbox, padding,  # type: ignore[arg-type]
+        cw, ch = page_w, page_h
+        bbox = image_api.padded_bbox(bbox, padding,
                                        canvas_w=cw, canvas_h=ch)
     # Size applies to the returned REGION, not the source image, so the
     # upscale bound is the crop's own dimensions. Asking for a width
@@ -73,7 +79,7 @@ def get_region(index: Path, leaf_num: int | None, book: str | None,
         size = image_api.clamp_size_to_native(
             size, int(bbox[2]) - int(bbox[0]), int(bbox[3]) - int(bbox[1]))
     url = image_api.region_url(row["image_service_url"],
-                                 bbox, size=size, fmt=fmt)  # type: ignore[arg-type]
+                                 bbox, size=size, fmt=fmt)
 
     if url_only:
         click.echo(url)

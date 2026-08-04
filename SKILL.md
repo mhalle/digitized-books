@@ -138,9 +138,30 @@ pages), `render-page` (reading order — see below), `outline-list`,
 `outline-status`.
 
 **Images** — `get-page`, `get-pages` (`--zip`, `--mosaic`, `--sample`,
-`--all`), `get-region` (arbitrary bbox), `get-figure` / `list-figures`
-(illustrations, where the OCR source marks them), `get-pdf`, `get-url`,
+`--all`), `get-region` (bbox in pixels, percentages `10%,20%,60%,80%`,
+or fractions), `get-figure` / `list-figures`, `get-pdf`, `get-url`,
 `get-info`, `ocr-page` (local Tesseract).
+
+### Finding a figure
+
+`list-figures` and `get-figure` only work where the OCR source marks
+illustrations as structured regions — **ALTO does, hOCR and DjVu do
+not**, so every Internet Archive index has no figures at all. That is
+the source's limitation, not a broken index, and the commands say so.
+
+For an IA book, find the plate by its caption instead — OCR captures
+that:
+
+```bash
+iiif-utils search-index -i INDEX -q 'Fig portal vein' --blocks
+iiif-utils get-region -i INDEX -b 680 --bbox '8%,12%,92%,72%'
+```
+
+`--blocks` returns a bbox per match, so the caption's own coordinates
+tell you where on the page to crop. Percentages avoid converting
+proportions to pixels by hand. `get-page-stats --figures` narrows
+candidates by page density but is a heuristic and does miss plates —
+treat it as a hint, not an answer.
 
 Image commands accept `--autocontrast` / `--cutoff` / `--preserve-tone`
 / `--quality`. Flat grey letterpress scans are often unreadable until
