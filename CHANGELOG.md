@@ -5,6 +5,41 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-08-04
+
+### Fixed
+
+- **Internet Archive indexes stored text and page numbers against the
+  wrong pages.** `get-text -l 23` returned printed page 19 while
+  `get-page -l 23` returned page 20, and the gap widened through the
+  book. Both commands succeeded, so nothing signalled it.
+
+  IA numbers every *leaf* it scanned, including colour-calibration cards
+  and leaves marked `Delete`. The IIIF manifest contains only the leaves
+  flagged `addToAccessFormats` in scandata, renumbered densely — so
+  canvas N is not leaf N. Gray 1918: 1,414 leaves, 1,402 canvases, 12
+  omissions in recto/verso pairs, canvas-minus-leaf walking 1, 3, 5, 7,
+  9. Everything IA publishes except the manifest is leaf-keyed — hOCR
+  `page_N`, `_page_numbers.json`, the jp2 files — and we stored all of
+  it at canvas indices.
+
+  Now translated at ingest from the scan file number in each canvas's
+  Image API URL, and cross-checked against scandata's
+  `addToAccessFormats`. Both sources agreed exactly on every item
+  tested; disagreement warns rather than guessing. `page_numbers.ia_leaf`
+  records the source leaf, `index_metadata.leaf_mapping` the scheme.
+
+  Verified on Gray at canvases 23, 687 and 1200: image, stored text and
+  printed page number now agree.
+
+  **Rebuild any IA index built before this** — `rebuild-index --refetch`
+  preserves outlines, and warns when a changed mapping makes an existing
+  `derived_outline` stale, since its canvas ranges were resolved under
+  the old keying.
+
+  Non-IA providers are unaffected: they have no leaf concept, and canvas
+  maps straight to a printed page via the canvas label.
+
 ## [0.1.9] - 2026-08-03
 
 ### Changed
@@ -305,6 +340,7 @@ simultaneously a Python package and a skill.
   geometry, since `ia-utils` never stored them. Both limits are recorded
   in the migrated index's `index_metadata`.
 
+[0.2.0]: https://github.com/mhalle/digitized-books/releases/tag/v0.2.0
 [0.1.9]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.9
 [0.1.8]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.8
 [0.1.7]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.7

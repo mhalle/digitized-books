@@ -179,6 +179,70 @@ def extra_metadata_for(manifest: dict[str, Any],
     return out
 
 
+# The scan file number embedded in every canvas's Image API URL, e.g.
+# `..._jp2%2Fanatomyofhumanbo1918gray_0688.jp2` -> leaf 688. Older items
+# use `_tif`.
+_LEAF_IN_URL_RE = re.compile(r"_(\d+)\.(?:jp2|tif|jpg)(?:$|[?#])",
+                              re.IGNORECASE)
+
+
+def canvas_leaf_map(canvases: list[Any]) -> dict[int, int]:
+    """Map canvas index -> IA leaf number, or {} if not derivable.
+
+    THE distinction this whole module has to get right. IA numbers every
+    *leaf* it scanned, including scanner colour cards and leaves the
+    operator marked `Delete`. The IIIF manifest contains only the leaves
+    flagged `addToAccessFormats` in scandata, renumbered densely from 0 —
+    so canvas N is generally NOT leaf N, and the gap grows through the
+    book as exclusions accumulate. Gray 1918 has 1,414 leaves, 1,402
+    canvases, and a canvas-to-leaf difference that walks 1, 3, 5, 7, 9.
+
+    Everything else IA publishes is keyed by leaf: hOCR `page_N` ids,
+    `_page_numbers.json` `leafNum`, the jp2/tif files, BookReader images.
+    Storing any of it at a canvas index without this translation puts a
+    page's text beside its neighbour's image, silently.
+
+    The leaf number is recoverable because the Image API URL addresses
+    the scan file directly, and the file number IS the leaf number.
+    """
+    out: dict[int, int] = {}
+    for c in canvases:
+        url = getattr(c, "image_service_url", None)
+        if not url:
+            continue
+        m = _LEAF_IN_URL_RE.search(url)
+        if m:
+            out[c.index] = int(m.group(1))
+    return out
+
+
+def parse_scandata_access_leaves(content: bytes) -> list[int] | None:
+    """Leaves IA includes in access formats, from `{id}_scandata.xml`.
+
+    An independent second opinion on `canvas_leaf_map`: these are exactly
+    the leaves that become canvases. Used to verify the URL-derived map
+    rather than to replace it — two sources agreeing is what lets an
+    item that breaks the pattern fail loudly instead of silently.
+    """
+    from lxml import etree  # type: ignore[attr-defined]
+    try:
+        root = etree.fromstring(content)
+    except Exception:
+        return None
+    leaves: list[int] = []
+    for pg in root.findall(".//page"):
+        num = pg.get("leafNum")
+        if num is None:
+            continue
+        flag = (pg.findtext("addToAccessFormats") or "").strip().lower()
+        if flag != "false":
+            try:
+                leaves.append(int(num))
+            except ValueError:
+                continue
+    return sorted(leaves) or None
+
+
 def parse_page_numbers(content: bytes) -> dict[int, dict[str, Any]]:
     """Parse IA's `{id}_page_numbers.json` into {leaf_num: fields}.
 

@@ -55,6 +55,14 @@ build outputs; a committed one becomes a stale liar about the version.
   values, shifting at every plate. Never convert by arithmetic — look it
   up. Use `parse_leaf_spec` for one and `parse_book_spec` for the other;
   conflating them was a real bug.
+- **Leaf ≠ canvas for Internet Archive.** IA numbers every scan; the
+  IIIF manifest keeps only the access leaves (scandata
+  `addToAccessFormats`) and renumbers them densely. hOCR `page_N`,
+  `_page_numbers.json` `leafNum` and the jp2 file number are all LEAF
+  keyed; canvases are not. Translate at ingest with
+  `internet_archive.canvas_leaf_map` — storing leaf-keyed data at a
+  canvas index shifted every IA book's text against its images. Pure
+  IIIF providers have no leaf; canvas is the universal key.
 - **Printed page numbers are not unique.** Plates repeat them and bound
   volumes restart at 1, so `resolve_leaf` deliberately *refuses* on an
   ambiguous page rather than picking one. Do not "fix" it to return the

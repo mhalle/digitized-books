@@ -15,6 +15,7 @@ from iiif_utils.core import database as db_mod
 from iiif_utils.core import health as health_mod
 from iiif_utils.core import http as http_
 from iiif_utils.core import manifest as manifest_mod
+from iiif_utils.providers import internet_archive as ia_mod
 from iiif_utils.providers import resolve
 from iiif_utils.utils.logger import Logger
 from iiif_utils.utils.slug import slugify
@@ -193,6 +194,7 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
     il_rows: list[dict[str, Any]] = []
     image_dims: dict[int, tuple[int, int]] = {}
     pw_rows: list[dict[str, Any]] = []
+    leaf_to_canvas: dict[int, int] = {}
     mono_source: str | None = None
     if no_ocr:
         n_alto_canvases = n_hocr_canvases = n_text_canvases = 0
@@ -221,7 +223,8 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
                 cfg_http=cfg_http, cache_dir=cache_dir, log=log,
             )
             if mono is not None:
-                tb_rows, image_dims, mono_source, pw_rows = mono
+                (tb_rows, image_dims, mono_source, pw_rows,
+                 leaf_to_canvas) = mono
 
     # --- index_metadata (after parse so we know the OCR provenance) --------
     from iiif_utils import __version__
@@ -254,6 +257,8 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
     if mono_source:
         # Whole-book OCR file (IA shape) rather than per-canvas seeAlso.
         idx_md["ocr_shape"] = "monolithic"
+        idx_md["leaf_mapping"] = ("ia_file_number" if leaf_to_canvas
+                                   else "identity")
     if flags.partial_digitization:
         idx_md["partial_digitization"] = flags.partial_digitization
     if flags.contains_multiple_volumes:
@@ -282,6 +287,13 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
         ref_obj.extra_metadata, cfg_http=cfg_http, cache_dir=cache_dir,
         log=log,
     )
+    # `_page_numbers.json` is keyed by LEAF, like everything else IA
+    # publishes. Re-key it to canvas, or `-b/--book` resolves to a page
+    # that drifts further from the truth the deeper into the book you go.
+    if pn_override and leaf_to_canvas:
+        pn_override = {leaf_to_canvas[leaf]: vals
+                       for leaf, vals in pn_override.items()
+                       if leaf in leaf_to_canvas}
     pn_rows: list[dict[str, Any]] = []
     for c in canvases:
         img_dim = image_dims.get(c.index)
@@ -296,6 +308,7 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
             "book_page_number": (
                 ov.get("book_page_number") if pn_override
                 else db_mod.book_page_from_label(c.label)),
+            "ia_leaf": leaf_to_canvas.get(c.index) if leaf_to_canvas else None,
             "confidence": ov.get("confidence"),
             "pageProb": ov.get("pageProb"),
             "wordConf": ov.get("wordConf"),
@@ -584,11 +597,49 @@ def _fetch_page_number_overrides(
     return out
 
 
+def _verify_leaf_map(leaf_to_canvas: dict[int, int],
+                      extra_metadata: dict[str, str], *,
+                      cfg_http: dict[str, Any], cache_dir: Path,
+                      log: Logger) -> None:
+    """Check the URL-derived leaf map against IA's scandata.
+
+    Two independent sources describe which leaves become canvases: the
+    scan file number in each canvas's Image API URL, and scandata's
+    `addToAccessFormats` flag. They agreed exactly on every item tested.
+    Cross-checking means an item that breaks the pattern fails loudly
+    instead of silently shifting a book's text against its images —
+    which is the failure this whole change exists to remove.
+    """
+    url = extra_metadata.get("ia_scandata_url")
+    if not url:
+        return
+    try:
+        content = http_.fetch_bytes(url, cfg_http=cfg_http,
+                                      cache_dir=cache_dir / "monolithic",
+                                      suffix=".scandata.xml")
+        access = ia_mod.parse_scandata_access_leaves(content)
+    except Exception as e:
+        log.info(f"scandata check skipped ({e})")
+        return
+    if not access:
+        return
+    derived = sorted(leaf_to_canvas)
+    if derived == access:
+        log.info(f"leaf map verified against scandata "
+                 f"({len(derived)} access leaves)")
+        return
+    log.warn(
+        f"leaf map DISAGREES with scandata: {len(derived)} leaves from "
+        f"canvas URLs vs {len(access)} flagged addToAccessFormats. Using "
+        f"the URL-derived map (it addresses the actual image), but text "
+        f"and images may not line up — spot-check a known page.")
+
+
 def _parse_monolithic_ocr(
     extra_metadata: dict[str, str], canvases: list[Any], *,
     cfg_http: dict[str, Any], cache_dir: Path, log: Logger,
 ) -> tuple[list[dict[str, Any]], dict[int, tuple[int, int]], str,
-             list[dict[str, Any]]] | None:
+             list[dict[str, Any]], dict[int, int]] | None:
     """Whole-book OCR fallback for providers with no per-canvas OCR.
 
     IA publishes OCR as monolithic derivatives — one `{id}_hocr.html`
@@ -641,23 +692,36 @@ def _parse_monolithic_ocr(
     if pages is None:
         return None
 
-    valid = {c.index for c in canvases}
+    # IA keys its OCR by LEAF; canvases are a dense renumbering of only
+    # the access-format leaves. Translate here, at the boundary, so
+    # everything downstream keeps meaning canvas.
+    leaf_to_canvas = {leaf: ci
+                      for ci, leaf in ia_mod.canvas_leaf_map(canvases).items()}
+    if leaf_to_canvas:
+        _verify_leaf_map(leaf_to_canvas, extra_metadata,
+                          cfg_http=cfg_http, cache_dir=cache_dir, log=log)
+    else:
+        # Not an IA-shaped item: leaf and canvas coincide by definition.
+        leaf_to_canvas = {c.index: c.index for c in canvases}
+
     tb_rows: list[dict[str, Any]] = []
     il_rows: list[dict[str, Any]] = []  # always empty for hOCR/DjVu
     pw_rows: list[dict[str, Any]] = []
     image_dims: dict[int, tuple[int, int]] = {}
     dropped = 0
     for leaf, page in pages:
-        if leaf not in valid:
+        canvas = leaf_to_canvas.get(leaf)
+        if canvas is None:
+            # A leaf IA excluded from access formats — a scanner colour
+            # card, or one the operator marked Delete. It has no canvas,
+            # so there is nothing to attach its text to.
             dropped += 1
             continue
-        _rows_from_page(leaf, page, default_block_type="ocr_par",
+        _rows_from_page(canvas, page, default_block_type="ocr_par",
                          tb_rows=tb_rows, il_rows=il_rows,
                          image_dims=image_dims, pw_rows=pw_rows)
-    if len(pages) != len(canvases):
-        log.warn(f"monolithic {source}: {len(pages)} OCR pages vs "
-                 f"{len(canvases)} canvases"
-                 + (f"; {dropped} pages outside canvas range dropped"
-                    if dropped else ""))
+    if dropped:
+        log.info(f"monolithic {source}: {dropped} OCR pages have no canvas "
+                 f"(colour cards / leaves IA excluded from access formats)")
     log.info(f"parsed {len(pages) - dropped} pages from monolithic {source}")
-    return tb_rows, image_dims, source, pw_rows
+    return tb_rows, image_dims, source, pw_rows, leaf_to_canvas

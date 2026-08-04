@@ -597,6 +597,43 @@ Notes, each verified against real items:
   converted once in `core.djvu` to the `x0,y0,x1,y1` convention every
   other parser uses. Downstream code never sees raw DjVu order.
 
+### Leaf, canvas, printed page — three identifiers, not two
+
+The distinction that produced the worst bug in this codebase.
+
+| | what it numbers | where it appears |
+|---|---|---|
+| **leaf** | every scan IA made | jp2/tif file number, hOCR `page_N` id, `_page_numbers.json` `leafNum`, BookReader `leafN`, scandata |
+| **canvas** | only the *access* leaves, renumbered densely from 0 | the IIIF manifest; everything this tool addresses with `-l` |
+| **printed page** | what is on the paper | `page_numbers.book_page_number` |
+
+IA scans colour-calibration cards and leaves the operator marks
+`Delete`, then omits them from access formats — scandata flags each leaf
+with `addToAccessFormats`. The IIIF manifest contains only the `true`
+ones, renumbered contiguously. Verified on Gray 1918: 1,414 leaves,
+1,402 canvases, and the 12 omissions are exactly the 12 flagged `false`
+(2 `Color Card`, 10 `Delete`). Because they occur in recto/verso pairs
+through the book, canvas-minus-leaf walks 1, 3, 5, 7, 9 — there is no
+single offset.
+
+**Every IA artefact except the manifest is leaf-keyed.** Storing any of
+it at a canvas index without translating puts a page's text beside its
+neighbour's image, and the drift grows with depth into the book. That is
+what happened: `get-text -l 23` returned page 19 while `get-page -l 23`
+returned page 20.
+
+Pure IIIF providers have no leaf at all — Wellcome, Heidelberg and the
+rest map canvas straight to a printed page via the canvas label. So
+canvas stays the universal primary key, and leaf is IA-specific
+provenance translated away at ingest (`providers/internet_archive.py::
+canvas_leaf_map`, from the scan file number in each canvas's Image API
+URL). `page_numbers.ia_leaf` records it; `index_metadata.leaf_mapping`
+records which scheme was used.
+
+The map is cross-checked against scandata's `addToAccessFormats` when
+available. Two independent sources, so an item that breaks the pattern
+warns instead of silently shifting.
+
 ### Provider-authoritative page numbers
 
 `book_page_number` normally comes from the canvas label. For IA that

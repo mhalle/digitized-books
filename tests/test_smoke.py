@@ -1076,7 +1076,7 @@ def test_monolithic_ocr_branch_hocr(monkeypatch, tmp_path):
         canvases, cfg_http={}, cache_dir=tmp_path, log=Logger(verbose=False),
     )
     assert out is not None
-    tb_rows, image_dims, source, pw_rows = out
+    tb_rows, image_dims, source, pw_rows, _map = out
     assert source == "hocr"
     assert image_dims[0] == (1000, 1500)
     assert [r["page_id"] for r in tb_rows] == [0, 1]
@@ -1098,7 +1098,7 @@ def test_monolithic_ocr_branch_djvu_fallback(monkeypatch, tmp_path):
         canvases, cfg_http={}, cache_dir=tmp_path, log=Logger(verbose=False),
     )
     assert out is not None
-    tb_rows, image_dims, source, pw_rows = out
+    tb_rows, image_dims, source, pw_rows, _map = out
     assert source == "djvu"
     assert len(tb_rows) == 1
     assert tb_rows[0]["text"] == "Smakula, Alexander"
@@ -1115,8 +1115,9 @@ def test_monolithic_ocr_branch_none_without_urls(tmp_path):
     assert out is None
 
 
-def test_monolithic_ocr_drops_out_of_range_leaves(monkeypatch, tmp_path):
-    """OCR pages beyond the canvas range are dropped with a warning."""
+def test_monolithic_ocr_drops_leaves_with_no_canvas(monkeypatch, tmp_path):
+    """A leaf with no canvas (colour card, Delete) has nothing to attach
+    its text to, so it is dropped."""
     from iiif_utils.commands import create_index as ci
     from iiif_utils.utils.logger import Logger
     monkeypatch.setattr(ci.http_, "fetch_bytes",
@@ -1127,7 +1128,7 @@ def test_monolithic_ocr_drops_out_of_range_leaves(monkeypatch, tmp_path):
         canvases, cfg_http={}, cache_dir=tmp_path, log=Logger(verbose=False),
     )
     assert out is not None
-    tb_rows, _dims, _source, _pw = out
+    tb_rows, _dims, _source, _pw, _map = out
     assert [r["page_id"] for r in tb_rows] == [0]
 
 
@@ -2149,3 +2150,98 @@ def test_get_region_has_the_image_options():
     for flag in ("--autocontrast", "--cutoff", "--preserve-tone",
                   "--quality"):
         assert flag in r.output, flag
+
+
+def test_ia_canvas_leaf_map_from_service_urls():
+    """Canvas N is not leaf N: IA renumbers the access leaves densely."""
+    from iiif_utils.core.manifest import Canvas
+    from iiif_utils.providers.internet_archive import canvas_leaf_map
+
+    def c(i, leaf, ext="jp2"):
+        return Canvas(index=i, canvas_id=f"c{i}", label=None, image_id=None,
+                       image_service_url=f"https://iiif.archive.org/image/"
+                                          f"iiif/3/x%2Fx_jp2.zip%2Fx_jp2%2F"
+                                          f"x_{leaf:04d}.{ext}",
+                       image_api_version="3", width=1, height=1,
+                       alto_url=None, text_url=None, hocr_url=None)
+
+    # Gray's real shape: canvas 0 is leaf 1, and the gap grows
+    m = canvas_leaf_map([c(0, 1), c(1, 2), c(2, 5), c(3, 6)])
+    assert m == {0: 1, 1: 2, 2: 5, 3: 6}
+    # Older items use .tif
+    assert canvas_leaf_map([c(0, 1, "tif")]) == {0: 1}
+    # Non-IA URLs yield nothing, and the caller falls back to identity
+    from iiif_utils.core.manifest import Canvas as C2
+    other = C2(index=0, canvas_id="c", label=None, image_id=None,
+                image_service_url="https://iiif.wellcome.org/image/b123",
+                image_api_version="2", width=1, height=1,
+                alto_url=None, text_url=None, hocr_url=None)
+    assert canvas_leaf_map([other]) == {}
+
+
+def test_ia_scandata_access_leaves():
+    """addToAccessFormats is the independent check on the URL-derived map."""
+    from iiif_utils.providers.internet_archive import (
+        parse_scandata_access_leaves)
+    xml = b"""<book><pageData>
+      <page leafNum="0"><pageType>Color Card</pageType>
+        <addToAccessFormats>false</addToAccessFormats></page>
+      <page leafNum="1"><pageType>Cover</pageType>
+        <addToAccessFormats>true</addToAccessFormats></page>
+      <page leafNum="2"><pageType>Normal</pageType>
+        <addToAccessFormats>true</addToAccessFormats></page>
+      <page leafNum="3"><pageType>Delete</pageType>
+        <addToAccessFormats>false</addToAccessFormats></page>
+    </pageData></book>"""
+    assert parse_scandata_access_leaves(xml) == [1, 2]
+    assert parse_scandata_access_leaves(b"not xml") is None
+
+
+def test_monolithic_ocr_stores_leaf_keyed_text_at_the_right_canvas(
+        monkeypatch, tmp_path):
+    """The regression that shifted every IA book's text against its images.
+
+    hOCR pages are keyed by leaf; canvases skip the leaves IA excludes.
+    Page id="page_2" belongs on the canvas whose image IS leaf 2.
+    """
+    from iiif_utils.commands import create_index as ci
+    from iiif_utils.core.manifest import Canvas
+    from iiif_utils.utils.logger import Logger
+
+    hocr = b"""<html><body>
+    <div class="ocr_page" id="page_0" title="bbox 0 0 100 100">
+      <div class="ocr_carea" title="bbox 0 0 9 9"><p class="ocr_par"
+        title="bbox 0 0 9 9"><span class="ocr_line" title="bbox 0 0 9 9">
+        <span class="ocrx_word" title="bbox 0 0 9 9">COLOURCARD</span>
+      </span></p></div></div>
+    <div class="ocr_page" id="page_1" title="bbox 0 0 100 100">
+      <div class="ocr_carea" title="bbox 0 0 9 9"><p class="ocr_par"
+        title="bbox 0 0 9 9"><span class="ocr_line" title="bbox 0 0 9 9">
+        <span class="ocrx_word" title="bbox 0 0 9 9">FIRSTPAGE</span>
+      </span></p></div></div>
+    <div class="ocr_page" id="page_5" title="bbox 0 0 100 100">
+      <div class="ocr_carea" title="bbox 0 0 9 9"><p class="ocr_par"
+        title="bbox 0 0 9 9"><span class="ocr_line" title="bbox 0 0 9 9">
+        <span class="ocrx_word" title="bbox 0 0 9 9">LATERPAGE</span>
+      </span></p></div></div>
+    </body></html>"""
+    monkeypatch.setattr(ci.http_, "fetch_bytes", lambda url, **kw: hocr)
+
+    def c(i, leaf):
+        return Canvas(index=i, canvas_id=f"c{i}", label=None, image_id=None,
+                       image_service_url=f"https://iiif.archive.org/image/"
+                                          f"iiif/3/x%2Fx_{leaf:04d}.jp2",
+                       image_api_version="3", width=1, height=1,
+                       alto_url=None, text_url=None, hocr_url=None)
+    # leaf 0 excluded; canvas 0 -> leaf 1, canvas 1 -> leaf 5
+    canvases = [c(0, 1), c(1, 5)]
+    out = ci._parse_monolithic_ocr(
+        {"ia_hocr_url": "https://x/h.html"}, canvases,
+        cfg_http={}, cache_dir=tmp_path, log=Logger(verbose=False))
+    assert out is not None
+    tb_rows, _dims, _src, _pw, leaf_map = out
+    by_canvas = {r["page_id"]: r["text"] for r in tb_rows}
+    assert by_canvas == {0: "FIRSTPAGE", 1: "LATERPAGE"}, by_canvas
+    assert leaf_map == {1: 0, 5: 1}
+    # The excluded leaf's text is dropped, not stored somewhere wrong
+    assert "COLOURCARD" not in "".join(by_canvas.values())

@@ -112,6 +112,7 @@ def _refetch_ocr(db: Any, *, provider: str | None,
             f"{ref_obj.manifest_url} now has 0 canvases — refusing to wipe "
             f"text_blocks on the strength of that.")
 
+    leaf_to_canvas: dict[int, int] = {}
     tb_rows, _il_rows, image_dims, pw_rows = _parse_altos(
         canvases, cfg_http=cfg_http, cache_dir=cache_dir, log=log)
     if not tb_rows:
@@ -119,7 +120,7 @@ def _refetch_ocr(db: Any, *, provider: str | None,
             ref_obj.extra_metadata, canvases,
             cfg_http=cfg_http, cache_dir=cache_dir, log=log)
         if mono is not None:
-            tb_rows, image_dims, _source, pw_rows = mono
+            tb_rows, image_dims, _source, pw_rows, leaf_to_canvas = mono
 
     if not tb_rows:
         raise click.ClickException(
@@ -149,6 +150,10 @@ def _refetch_ocr(db: Any, *, provider: str | None,
     pn_override = _fetch_page_number_overrides(
         ref_obj.extra_metadata, cfg_http=cfg_http, cache_dir=cache_dir,
         log=log)
+    if pn_override and leaf_to_canvas:
+        pn_override = {leaf_to_canvas[leaf]: vals
+                       for leaf, vals in pn_override.items()
+                       if leaf in leaf_to_canvas}
     if pn_override and "page_numbers" in existing:
         for leaf, vals in pn_override.items():
             db.execute(
@@ -158,10 +163,26 @@ def _refetch_ocr(db: Any, *, provider: str | None,
                 (vals["book_page_number"], vals["confidence"],
                  vals["pageProb"], vals["wordConf"], leaf))
 
+    # An outline's canvas_start/canvas_end were resolved through the
+    # page_numbers that existed when it was built. If this rebuild changes
+    # the leaf mapping, those references now point at the wrong pages —
+    # and would be the only thing left wrong, which is harder to notice
+    # than the original fault. Say so rather than silently keeping them.
+    if n_outline and leaf_to_canvas:
+        prev = {r["key"]: r["value"] for r in db["index_metadata"].rows}
+        if prev.get("leaf_mapping") != "ia_file_number":
+            log.warn(
+                f"derived_outline has {n_outline} rows resolved under the "
+                f"OLD leaf mapping; its canvas ranges are probably shifted. "
+                f"Re-run the outline import for this book, or clear it with "
+                f"`outline-clear`.")
+
     idx_updates = {"rebuilt_at": db_mod.now_iso()}
     if pw_rows:
         from iiif_utils.core.wordgeom import WORDS_SCHEMA
         idx_updates["words_schema"] = WORDS_SCHEMA
+    if leaf_to_canvas:
+        idx_updates["leaf_mapping"] = "ia_file_number"
     db_mod.write_index_metadata(db, idx_updates)
 
     click.echo(f"  text_blocks:     {len(tb_rows):,} (rewritten)")
