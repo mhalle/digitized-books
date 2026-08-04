@@ -3,10 +3,36 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import time
 from pathlib import Path
 from typing import Any
 
 import httpx
+
+# Retry on anything transport-level. The earlier tuple listed
+# RemoteProtocolError / ReadError / ConnectError and so missed
+# ReadTimeout, which is a *sibling* under TransportError rather than a
+# subclass of any of them — and is the failure archive.org actually
+# produces. A single timeout escaped the whole max_retries budget,
+# which for `create-index` meant silently falling back from hOCR to
+# DjVu and building a poorer index that still reported success.
+_RETRYABLE = httpx.TransportError
+
+
+def _timeout(cfg_http: dict[str, Any]) -> httpx.Timeout:
+    """Connect and read budgets, not one number for both.
+
+    A single scalar applied the same value to connect/read/write/pool.
+    Against archive.org the variable part is time-to-first-byte — it
+    spins large derivatives up from storage, and that wait is unbounded
+    and unrelated to how long a connection should take to establish.
+    Measured: a 12.4 MB hOCR transfers in ~1.7s once bytes flow, but
+    TTFB ranged from 1.1s to over 45s on the same file.
+    """
+    total = float(cfg_http.get("timeout_seconds", 60))
+    connect = float(cfg_http.get("connect_timeout_seconds", 15))
+    read = float(cfg_http.get("read_timeout_seconds", max(total, 180)))
+    return httpx.Timeout(total, connect=min(connect, total), read=read)
 
 
 def cache_path(cache_dir: Path, url: str, suffix: str = "") -> Path:
@@ -30,7 +56,7 @@ def fetch_json(url: str, *, cfg_http: dict[str, Any],
             import json
             return json.loads(cp.read_text())  # type: ignore[no-any-return]
     headers = {"User-Agent": cfg_http.get("user_agent", "iiif-utils/0.1")}
-    timeout = httpx.Timeout(float(cfg_http.get("timeout_seconds", 60)))
+    timeout = _timeout(cfg_http)
     with httpx.Client(timeout=timeout, follow_redirects=True,
                       headers=headers) as client:
         r = client.get(url)
@@ -64,17 +90,15 @@ def fetch_bytes(url: str, *, cfg_http: dict[str, Any],
         if cp.exists() and cp.stat().st_size > 0:
             return cp.read_bytes()
     headers = {"User-Agent": cfg_http.get("user_agent", "iiif-utils/0.1")}
-    timeout = httpx.Timeout(float(cfg_http.get("timeout_seconds", 60)))
+    timeout = _timeout(cfg_http)
     max_retries = int(cfg_http.get("max_retries", 8))
     base_backoff = float(cfg_http.get("retry_base_seconds", 0.5))
-    import time
     with httpx.Client(timeout=timeout, follow_redirects=True,
                       headers=headers) as client:
         for attempt in range(max_retries + 1):
             try:
                 r = client.get(url)
-            except (httpx.RemoteProtocolError, httpx.ReadError,
-                     httpx.ConnectError):
+            except _RETRYABLE:
                 if attempt == max_retries:
                     raise
                 time.sleep(base_backoff * (2 ** attempt))
@@ -89,6 +113,12 @@ def fetch_bytes(url: str, *, cfg_http: dict[str, Any],
                 continue
             r.raise_for_status()
             content = r.content
+            # Never cache an empty body: the read guard is `exists() and
+            # size > 0`, so a zero-length write would be re-fetched, but
+            # writing it at all is pointless and a truncated one would
+            # be served forever.
+            if cache_dir is not None and not content:
+                return content
             if cache_dir is not None:
                 cp = cache_path(cache_dir, url, suffix)
                 cp.write_bytes(content)
@@ -117,7 +147,7 @@ async def fetch_many_bytes(
         budget on 429 / 5xx
     """
     headers = {"User-Agent": cfg_http.get("user_agent", "iiif-utils/0.1")}
-    timeout = httpx.Timeout(float(cfg_http.get("timeout_seconds", 60)))
+    timeout = _timeout(cfg_http)
     concurrency = int(cfg_http.get("max_concurrency", 8))
     max_retries = int(cfg_http.get("max_retries", 8))
     base_backoff = float(cfg_http.get("retry_base_seconds", 0.5))
@@ -154,8 +184,7 @@ async def fetch_many_bytes(
                 await pace()
                 try:
                     r = await client.get(url)
-                except (httpx.RemoteProtocolError, httpx.ReadError,
-                         httpx.ConnectError):
+                except _RETRYABLE:
                     if attempt == max_retries:
                         raise
                     await asyncio.sleep(base_backoff * (2 ** attempt))

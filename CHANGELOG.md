@@ -5,6 +5,50 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-08-04
+
+### Fixed
+
+- **A read timeout silently downgraded the OCR source.**
+  `httpx.ReadTimeout` is a *sibling* of the exception classes the retry
+  clause listed, not a subclass of any of them, so the entire
+  `max_retries` budget was skipped for the one failure archive.org
+  actually produces. A single stalled fetch fell straight through to the
+  DjVu fallback, and `create-index` reported success — meaning on a bulk
+  run the OCR quality of a corpus varied with transient network luck.
+
+  Retries now catch `httpx.TransportError`, which subsumes all four
+  previous classes plus every timeout. Verified on
+  `sim_american-city-county_1938-04_53_4`: `ocr_source` is now `hocr`
+  where it had been `djvu`.
+
+- Connect and read timeouts are configurable separately
+  (`connect_timeout_seconds`, `read_timeout_seconds`, default 15 / 180).
+  One scalar for both was wrong for a host whose variable cost is
+  time-to-first-byte: the same 12.4 MB file transferred in ~1.7s once
+  bytes flowed but took anywhere from 1.1s to 45s to start.
+
+- An empty response body is never written to the HTTP cache.
+
+- **`text_blocks.avg_font_size` was always NULL** even though hOCR
+  carries `x_fsize` for essentially every word. `TextBlock` had no such
+  field, so the column was created and hardcoded to `None`. Now
+  populated from the block's per-word **median** — a mean lets a single
+  drop cap misreport a body paragraph as display type.
+
+  Caveat worth knowing: in a magazine the largest type is usually
+  advertising, so font size alone will not rank article headings first.
+  Combine it with `block_type` (`ocr_header`) or page position. The
+  column being NULL was a dead end; it is not by itself a heading
+  detector.
+
+### Added
+
+- When the preferred OCR source fails, `index_metadata` records
+  `ocr_source_fallback_from` and `..._reason`, and the build summary says
+  so. A 712-item ingest can be audited with a query instead of by
+  scraping stderr.
+
 ## [0.2.0] - 2026-08-04
 
 ### Fixed
@@ -340,6 +384,7 @@ simultaneously a Python package and a skill.
   geometry, since `ia-utils` never stored them. Both limits are recorded
   in the migrated index's `index_metadata`.
 
+[0.2.1]: https://github.com/mhalle/digitized-books/releases/tag/v0.2.1
 [0.2.0]: https://github.com/mhalle/digitized-books/releases/tag/v0.2.0
 [0.1.9]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.9
 [0.1.8]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.8

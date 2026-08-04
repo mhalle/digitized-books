@@ -259,6 +259,9 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
         idx_md["ocr_shape"] = "monolithic"
         idx_md["leaf_mapping"] = ("ia_file_number" if leaf_to_canvas
                                    else "identity")
+        if _FALLBACK.get("from"):
+            idx_md["ocr_source_fallback_from"] = _FALLBACK["from"]
+            idx_md["ocr_source_fallback_reason"] = _FALLBACK["reason"]
     if flags.partial_digitization:
         idx_md["partial_digitization"] = flags.partial_digitization
     if flags.contains_multiple_volumes:
@@ -372,6 +375,9 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
     click.echo(f"  canvases:      {n_pages}")
     click.echo(f"  text_blocks:   {n_blocks:,}")
     click.echo(f"  illustrations: {n_illus:,}")
+    if _FALLBACK.get("from"):
+        click.echo(f"  OCR SOURCE:    {_FALLBACK['from']} unavailable, used "
+                   f"{mono_source} instead ({_FALLBACK['reason']})")
     if pw_rows:
         n_words = sum(1 for _ in pw_rows)
         blob_kb = sum(len(r["blob"]) for r in pw_rows) / 1024
@@ -551,7 +557,7 @@ def _rows_from_page(page_index: int, page: Any, *, default_block_type: str,
             "word_count": b.word_count,
             "length": b.length,
             "avg_confidence": b.avg_confidence,
-            "avg_font_size": None,
+            "avg_font_size": b.avg_font_size,
             "parent_carea_id": None,
             "alto_id": b.alto_id,
         })
@@ -595,6 +601,13 @@ def _fetch_page_number_overrides(
     log.info(f"page numbers from IA detector: {n_numbered} numbered "
              f"of {len(out)} leaves")
     return out
+
+
+# Set by _parse_monolithic_ocr when the preferred OCR source failed and a
+# poorer one was used instead. Module-level because the summary and
+# index_metadata are written outside that call; single-threaded by
+# construction (one create-index per process).
+_FALLBACK: dict[str, str] = {"from": "", "reason": ""}
 
 
 def _verify_leaf_map(leaf_to_canvas: dict[int, int],
@@ -655,6 +668,8 @@ def _parse_monolithic_ocr(
     """
     hocr_url = extra_metadata.get("ia_hocr_url")
     djvu_url = extra_metadata.get("ia_djvu_xml_url")
+    _FALLBACK["from"] = ""
+    _FALLBACK["reason"] = ""
     if not hocr_url and not djvu_url:
         return None
 
@@ -673,6 +688,11 @@ def _parse_monolithic_ocr(
         except Exception as e:
             log.warn(f"monolithic hOCR failed ({e}); "
                      + ("trying DjVu XML" if djvu_url else "no DjVu fallback"))
+            # Record it: a downgrade to a poorer source is invisible after
+            # the run otherwise, and on a bulk ingest the OCR quality of a
+            # corpus would then vary with transient network luck.
+            _FALLBACK["from"] = "hocr"
+            _FALLBACK["reason"] = str(e)[:200]
             pages = None
     if pages is None and djvu_url:
         from iiif_utils.core import djvu as djvu_mod

@@ -36,7 +36,7 @@ bbox is encoded in the `title` attribute as `bbox X1 Y1 X2 Y2`
 from __future__ import annotations
 
 import re
-from statistics import mean
+from statistics import mean, median
 from typing import Any
 
 from lxml import html as lxml_html
@@ -135,6 +135,7 @@ def _page_from_el(page_el: Any, block_classes: tuple[str, ...],
             " ' '), ' ocr_line ')]"
         )
         avg_conf = mean(confs) if (keep_confidence and confs) else None
+        fsizes: list[int] = []
 
         # Word geometry, walked per line in the same order as the block
         # text above. x_fsize is retained because it makes heading
@@ -155,6 +156,8 @@ def _page_from_el(page_el: Any, block_classes: tuple[str, ...],
                 wt = w.get("title") or ""
                 mc = _WCONF_RE.search(wt)
                 mf = _FSIZE_RE.search(wt)
+                if mf:
+                    fsizes.append(int(mf.group(1)))
                 page_words.append(Word(
                     text=t, x=wx0, y=wy0,
                     w=max(0, wx1 - wx0), h=max(0, wy1 - wy0),
@@ -175,6 +178,7 @@ def _page_from_el(page_el: Any, block_classes: tuple[str, ...],
             bbox_x0=x0, bbox_y0=y0, bbox_x1=x1, bbox_y1=y1,
             avg_confidence=avg_conf,
             block_type=_el_class(block, block_classes),
+            avg_font_size=float(median(fsizes)) if fsizes else None,
         ))
 
     illustrations: list[Illustration] = []  # hOCR has no Illustration analog

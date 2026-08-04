@@ -2245,3 +2245,85 @@ def test_monolithic_ocr_stores_leaf_keyed_text_at_the_right_canvas(
     assert leaf_map == {1: 0, 5: 1}
     # The excluded leaf's text is dropped, not stored somewhere wrong
     assert "COLOURCARD" not in "".join(by_canvas.values())
+
+
+def test_read_timeout_is_retried():
+    """The regression: ReadTimeout is a sibling of the classes the retry
+    clause used to list, not a subclass, so the whole retry budget was
+    skipped for the one failure archive.org actually produces."""
+    import httpx
+    from iiif_utils.core.http import _RETRYABLE
+    for exc in (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.PoolTimeout,
+                 httpx.WriteTimeout, httpx.ReadError, httpx.ConnectError,
+                 httpx.RemoteProtocolError):
+        assert issubclass(exc, _RETRYABLE), exc.__name__
+
+
+def test_fetch_bytes_retries_a_read_timeout(monkeypatch, tmp_path):
+    import httpx
+    from iiif_utils.core import http as http_mod
+
+    calls = {"n": 0}
+
+    class FakeResp:
+        status_code = 200
+        content = b"recovered"
+        headers: dict[str, str] = {}
+        def raise_for_status(self): return None
+
+    class FakeClient:
+        def __init__(self, **kw): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def get(self, url):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise httpx.ReadTimeout("timed out")
+            return FakeResp()
+
+    monkeypatch.setattr(http_mod.httpx, "Client", FakeClient)
+    monkeypatch.setattr(http_mod.time, "sleep", lambda s: None)
+    out = http_mod.fetch_bytes("https://x/y",
+                                cfg_http={"max_retries": 3,
+                                          "retry_base_seconds": 0})
+    assert out == b"recovered"
+    assert calls["n"] == 2, "should have retried once, not given up"
+
+
+def test_timeout_splits_connect_and_read():
+    from iiif_utils.core.http import _timeout
+    t = _timeout({})
+    assert t.connect is not None and t.read is not None
+    # Read budget is generous: IA's variable part is time-to-first-byte.
+    assert t.read >= 180
+    assert t.connect <= 15
+    t2 = _timeout({"connect_timeout_seconds": 5, "read_timeout_seconds": 300})
+    assert t2.connect == 5 and t2.read == 300
+
+
+def test_hocr_populates_avg_font_size():
+    """x_fsize was parsed into page_words but never reached the block row,
+    so callers doing structural heading detection found the column NULL."""
+    from iiif_utils.core.hocr import parse_hocr_multipage
+    sample = b"""<html><body>
+    <div class="ocr_page" id="page_0" title="bbox 0 0 100 100">
+      <div class="ocr_carea" title="bbox 0 0 90 20">
+        <p class="ocr_header" title="bbox 0 0 90 20">
+          <span class="ocr_line" title="bbox 0 0 90 20">
+            <span class="ocrx_word" title="bbox 0 0 40 20; x_fsize 30">BIG</span>
+            <span class="ocrx_word" title="bbox 45 0 90 20; x_fsize 30">TITLE</span>
+          </span></p></div>
+      <div class="ocr_carea" title="bbox 0 30 90 50">
+        <p class="ocr_par" title="bbox 0 30 90 50">
+          <span class="ocr_line" title="bbox 0 30 90 50">
+            <span class="ocrx_word" title="bbox 0 30 40 50; x_fsize 9">body</span>
+            <span class="ocrx_word" title="bbox 45 30 90 50; x_fsize 40">DROPCAP</span>
+            <span class="ocrx_word" title="bbox 45 30 90 50; x_fsize 9">text</span>
+          </span></p></div>
+    </div></body></html>"""
+    page = parse_hocr_multipage(sample)[0][1]
+    head, body = page.text_blocks[0], page.text_blocks[1]
+    assert head.avg_font_size == 30.0
+    # Median, not mean: the 40pt drop cap must not drag the body block up
+    assert body.avg_font_size == 9.0
+    assert head.avg_font_size > body.avg_font_size

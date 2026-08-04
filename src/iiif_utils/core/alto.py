@@ -37,6 +37,11 @@ class TextBlock:
     # NULL-confidence invariant (see core/hocr.py).
     avg_confidence: float | None = None
     block_type: str | None = None
+    # Median (not mean) of the block's per-word x_fsize. Drop caps and
+    # OCR noise skew a mean badly. This is what makes heading detection
+    # structural rather than regex-based; hOCR carries it, ALTO and DjVu
+    # do not, so it stays None there.
+    avg_font_size: float | None = None
 
 
 @dataclass(frozen=True)
