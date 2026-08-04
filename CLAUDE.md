@@ -47,11 +47,13 @@ build outputs; a committed one becomes a stale liar about the version.
 
 ## Gotchas
 
-- **Leaf ≠ printed page.** `-l/--leaf` is the 0-based scan index and is
-  always an integer. `-b/--book` is the number printed on the page and
-  is TEXT — roman front matter (`xii`), plate suffixes (`12a`). They
-  differ by the front-matter offset. Use `parse_leaf_spec` for one and
-  `parse_book_spec` for the other; they are not interchangeable, and
+- **Leaf ≠ printed page, and the relationship is a table.** `-l/--leaf`
+  is the 0-based scan index (integer); `-b/--book` is the number printed
+  on the page (TEXT — `xii`, `12a`). `page_numbers` maps between them,
+  one row per leaf, from the provider's own detection. There is no
+  offset to apply: Gray 1918 alone has five distinct leaf-minus-page
+  values, shifting at every plate. Never convert by arithmetic — look it
+  up. Use `parse_leaf_spec` for one and `parse_book_spec` for the other;
   conflating them was a real bug.
 - **Printed page numbers are not unique.** Plates repeat them and bound
   volumes restart at 1, so `resolve_leaf` deliberately *refuses* on an

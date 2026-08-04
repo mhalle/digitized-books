@@ -77,21 +77,34 @@ the launcher path above.**
 
 ## Addressing a page: leaf vs printed page
 
-This trips people up constantly, so get it right first.
+Two ways to name a page, one flag each. Use the flag that matches the
+number you already have:
 
-- **`-l/--leaf N`** — the 0-based scan sequence index. Always an
-  integer. Also called the *canvas* in IIIF vocabulary; the same number.
-- **`-b/--book LABEL`** — the number **printed on the page**. This is
-  TEXT, not an integer: `xii`, `12a`, `209`. Ranges like `100-150`
-  expand; anything non-numeric is matched literally.
+- **`-b/--book LABEL`** — the number **printed on the page**. Use this
+  for anything that came out of the book: a citation, an index entry, a
+  table of contents, a user saying "page 680". It is TEXT, not an
+  integer — `xii`, `12a`, `209`. Ranges like `100-150` expand;
+  non-numeric labels match literally.
+- **`-l/--leaf N`** — the 0-based scan index, called the *canvas* in
+  IIIF vocabulary. Use this for anything that came out of this tool:
+  `search-index` hits, `get-page-stats` rows, outline entries.
 
-They differ by the front matter offset — in Gray's *Anatomy* (1918),
-leaf 24 is printed page 20.
+**The relationship between them is a table, not a formula.** It lives in
+`page_numbers`, one row per leaf, built from the provider's own page
+detection. Do not compute one from the other, and do not carry an offset
+from one page to the next: in Gray's *Anatomy* (1918) the leaf-minus-page
+difference takes **five different values** (0 on 57% of pages, then +8,
++2, +6, +4), shifting at every plate and insert. Any arithmetic that
+works on one page is wrong a few pages later.
 
-A printed page number is **not unique** (plates repeat numbers, bound
-volumes restart at 1, OCR misreads). When several leaves claim one
+So: if you have a printed page number, pass `-b` and let the lookup
+happen. If you need to see the mapping, `get-page-stats` prints `leaf`
+and `page` side by side for every page.
+
+A printed page number is **not unique** — plates repeat them, bound
+volumes restart at 1, OCR misreads. When several leaves claim one
 printed page the tool refuses and lists the candidates rather than
-guessing; disambiguate with `-l`.
+guessing; pick one with `-l`.
 
 Records carry both `leaf` and `canvas` keys with the same value, so
 output from different commands joins cleanly.

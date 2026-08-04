@@ -5,6 +5,27 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.9] - 2026-08-03
+
+### Changed
+
+- Rewrote the leaf-vs-printed-page guidance, which kept producing the
+  same mistake. It described the two flags and then gave one example —
+  "leaf 24 is printed page 20" — which reads as an offset to apply. It
+  is not one. Measured on Gray 1918, the leaf-minus-page difference
+  takes **five distinct values** (0 on 57% of pages, then +8, +2, +6,
+  +4), shifting at every plate and insert, so arithmetic that works on
+  one page is wrong a few pages later.
+
+  There is no rule to learn: there are two flags and a lookup table.
+  `-b/--book` for a number that came out of the book, `-l/--leaf` for
+  one that came out of this tool, and `page_numbers` maps between them.
+  `get-page-stats` prints both columns if you want to see the mapping.
+
+- `get-page` now reports both numbers when it saves —
+  `[leaf 24 = printed page 20]`. Addressing the wrong page otherwise
+  fails silently: you get a page, just not the one you meant.
+
 ## [0.1.8] - 2026-08-03
 
 ### Fixed
@@ -284,6 +305,7 @@ simultaneously a Python package and a skill.
   geometry, since `ia-utils` never stored them. Both limits are recorded
   in the migrated index's `index_metadata`.
 
+[0.1.9]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.9
 [0.1.8]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.8
 [0.1.7]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.7
 [0.1.6]: https://github.com/mhalle/digitized-books/releases/tag/v0.1.6

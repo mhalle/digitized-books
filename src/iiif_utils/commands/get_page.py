@@ -64,8 +64,8 @@ def get_page(index: Path, leaf_num: int | None, book: str | None,
     conn.row_factory = sqlite3.Row
     leaf_num = resolve_leaf(conn, leaf_num, book)
     row = conn.execute(
-        "SELECT image_service_url, image_width, image_height, width, height "
-        "FROM page_numbers WHERE leaf_num = ?",
+        "SELECT image_service_url, image_width, image_height, width, height, "
+        "book_page_number FROM page_numbers WHERE leaf_num = ?",
         (leaf_num,),
     ).fetchone()
     if not row or not row["image_service_url"]:
@@ -160,7 +160,13 @@ def get_page(index: Path, leaf_num: int | None, book: str | None,
             preserve_tone=preserve_tone,
         )
     output_path.write_bytes(content)
-    click.echo(f"saved {output_path}  ({len(content)/1024:.1f} KB)")
+    # Name both numbers: the whole class of leaf/page mistakes is silent
+    # otherwise — you get a page, just not the one you meant.
+    printed = row["book_page_number"]
+    where = (f"leaf {leaf_num} = printed page {printed}" if printed
+             else f"leaf {leaf_num} (no printed page number)")
+    click.echo(f"saved {output_path}  ({len(content)/1024:.1f} KB)  "
+               f"[{where}]")
 
 
 def _doc_value(conn: sqlite3.Connection, key: str) -> str | None:
