@@ -780,6 +780,7 @@ def _parse_monolithic_ocr(
     pw_rows: list[dict[str, Any]] = []
     image_dims: dict[int, tuple[int, int]] = {}
     dropped = 0
+    covered: set[int] = set()
     for leaf, page in pages:
         canvas = text_leaf_to_canvas.get(leaf)
         if canvas is None:
@@ -788,9 +789,26 @@ def _parse_monolithic_ocr(
             # so there is nothing to attach its text to.
             dropped += 1
             continue
+        covered.add(canvas)
         _rows_from_page(canvas, page, default_block_type="ocr_par",
                          tb_rows=tb_rows, il_rows=il_rows,
                          image_dims=image_dims, pw_rows=pw_rows)
+    # A monolithic derivative that arrives short is indistinguishable from
+    # a complete one: it is a 200 with a well-formed prefix, and lxml
+    # parses the truncation happily. The only symptom is that most
+    # canvases end up with no OCR at all, which otherwise shows up as an
+    # index that simply finds nothing. archive.org was serving
+    # intermittent 500s and truncated derivative responses on 2026-08-04,
+    # so say it loudly rather than logging a count at info level.
+    if canvases and len(covered) < 0.9 * len(canvases):
+        log.warn(
+            f"monolithic {source} covered only {len(covered)} of "
+            f"{len(canvases)} canvases — the derivative may have arrived "
+            f"truncated, or its leaf numbering may not match this "
+            f"manifest. Most pages will have no searchable text. "
+            f"Re-run to re-fetch (the cache skips zero-length bodies but "
+            f"cannot detect a short one)."
+        )
     if dropped:
         log.info(f"monolithic {source}: {dropped} OCR pages have no canvas "
                  f"(colour cards / leaves IA excluded from access formats)")

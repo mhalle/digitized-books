@@ -2527,3 +2527,84 @@ def test_filename_join_rejected_when_names_are_not_distinct(
     assert ci._ALIGN["join"] == "file_number"
     assert {r["page_id"]: r["text"] for r in tb_rows} == {
         0: "FORTYONE", 1: "FORTYTWO"}
+
+
+def test_server_error_page_is_never_parsed_or_cached(tmp_path, monkeypatch):
+    """archive.org answered derivative URLs with a 170-byte HTML 500 page
+    on 2026-08-04. That must raise after the retry budget, not come back
+    as bytes for the hOCR parser to find zero pages in."""
+    import httpx
+    import pytest
+
+    from iiif_utils.core import http as http_
+
+    body = (b"<html><head><title>500 Internal Server Error</title></head>"
+            b"<body><center><h1>500 Internal Server Error</h1></center>"
+            b"</body></html>")
+    calls = {"n": 0}
+
+    class FakeClient:
+        def __init__(self, **kw):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def get(self, url):
+            calls["n"] += 1
+            return httpx.Response(500, content=body,
+                                   request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(http_.httpx, "Client", FakeClient)
+    monkeypatch.setattr(http_.time, "sleep", lambda *_: None)
+    with pytest.raises(httpx.HTTPStatusError):
+        http_.fetch_bytes("https://archive.org/download/x/x_hocr.html",
+                           cfg_http={"max_retries": 2},
+                           cache_dir=tmp_path, suffix=".hocr.html")
+    assert calls["n"] == 3            # retried, not accepted on sight
+    assert list(tmp_path.iterdir()) == []   # and nothing cached
+
+
+def test_truncated_monolithic_ocr_is_warned_about(monkeypatch, tmp_path):
+    """A short derivative is a well-formed 200 that lxml parses happily;
+    the only symptom is that most canvases get no text."""
+    from iiif_utils.commands import create_index as ci
+    from iiif_utils.utils.logger import Logger
+
+    hocr = ("<html><body>"
+            + _hocr_page("page_1", "x_jp2/x_0001.jp2", "ONLYPAGE")
+            + "</body></html>").encode()
+    monkeypatch.setattr(ci.http_, "fetch_bytes", lambda url, **kw: hocr)
+    monkeypatch.setattr(ci, "_verify_leaf_map", lambda *a, **kw: None)
+
+    warnings: list[str] = []
+    log = Logger(verbose=False)
+    monkeypatch.setattr(log, "warn", lambda m: warnings.append(m))
+
+    canvases = [_ia_canvas(i, i + 1) for i in range(20)]
+    ci._parse_monolithic_ocr({"ia_hocr_url": "https://x/h.html"}, canvases,
+                              cfg_http={}, cache_dir=tmp_path, log=log)
+    assert any("covered only 1 of 20 canvases" in w for w in warnings), warnings
+
+
+def test_complete_monolithic_ocr_is_not_warned_about(monkeypatch, tmp_path):
+    from iiif_utils.commands import create_index as ci
+    from iiif_utils.utils.logger import Logger
+
+    hocr = ("<html><body>" + "".join(
+        _hocr_page(f"page_{i + 1}", f"x_jp2/x_{i + 1:04d}.jp2", f"P{i}")
+        for i in range(20)) + "</body></html>").encode()
+    monkeypatch.setattr(ci.http_, "fetch_bytes", lambda url, **kw: hocr)
+    monkeypatch.setattr(ci, "_verify_leaf_map", lambda *a, **kw: None)
+
+    warnings: list[str] = []
+    log = Logger(verbose=False)
+    monkeypatch.setattr(log, "warn", lambda m: warnings.append(m))
+
+    canvases = [_ia_canvas(i, i + 1) for i in range(20)]
+    ci._parse_monolithic_ocr({"ia_hocr_url": "https://x/h.html"}, canvases,
+                              cfg_http={}, cache_dir=tmp_path, log=log)
+    assert not warnings, warnings

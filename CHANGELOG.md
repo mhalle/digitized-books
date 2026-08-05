@@ -5,6 +5,30 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-08-05
+
+### Added
+
+- **A truncated monolithic OCR derivative is now warned about.** A short
+  `_hocr.html` arrives as a well-formed 200 that lxml parses happily, so
+  the only symptom is that most canvases end up with no text — an index
+  that silently finds nothing. `create-index` now warns when the OCR
+  covers under 90% of the manifest's canvases. Prompted by archive.org
+  serving intermittent 500s and short derivative responses on
+  2026-08-04.
+
+### Verified (no change)
+
+- Server error pages cannot be parsed as OCR or written to the cache:
+  5xx is retried to the configured budget and then raised, and redirects
+  are followed. Now covered by a test using the exact 170-byte HTML 500
+  body archive.org was returning.
+- `anatomyofhumanbo1918gray` alignment is unchanged by 0.2.2. Its hOCR
+  declares the placeholder `image https://archive.org/todo` on every
+  page, so the filename join correctly declines and the file-number map
+  applies: canvas 23 gets hOCR page 24, which `_page_numbers.json`
+  independently confirms is printed page 20.
+
 ## [0.2.2] - 2026-08-04
 
 ### Fixed
