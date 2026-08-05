@@ -63,6 +63,19 @@ build outputs; a committed one becomes a stale liar about the version.
   `internet_archive.canvas_leaf_map` — storing leaf-keyed data at a
   canvas index shifted every IA book's text against its images. Pure
   IIIF providers have no leaf; canvas is the universal key.
+- **"Leaf" is two different numbers on IA, and they disagree.** The
+  hOCR page id (`page_000040`) and the scan file number (`_0041.jp2`)
+  are separate sequences: Gray 1918 has them equal, `barkuoft` has the
+  id one lower, and no arithmetic covers both. So join OCR to canvases
+  on the *filename* the `ocr_page` title declares (`image "…/x_0041.jp2"`),
+  which the canvas's Image API URL also names — see
+  `hocr.page_image_name` / `internet_archive.canvas_image_names`. Fall
+  back to the file number only when the hOCR names no usable image
+  (Gray writes the placeholder `image https://archive.org/todo`), and
+  never accept a partial or non-distinct filename match.
+  `_page_numbers.json` `leafNum` is the FILE number (1-based), so page
+  numbers must be rekeyed by that map even when the text was joined by
+  filename — one `leaf_to_canvas` for both is a bug.
 - **Printed page numbers are not unique.** Plates repeat them and bound
   volumes restart at 1, so `resolve_leaf` deliberately *refuses* on an
   ambiguous page rather than picking one. Do not "fix" it to return the

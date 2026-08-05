@@ -1028,8 +1028,11 @@ def test_djvu_leaf_from_usemap_not_position():
     <OBJECT usemap="x_0004.djvu" width="100" height="200"></OBJECT>
     </BODY></DjVuXML>"""
     pages = parse_djvu_multipage(sample)
-    # usemap is 1-based → 0-based leaves 0 and 3, NOT positions 0 and 1
-    assert [leaf for leaf, _ in pages] == [0, 3]
+    # The file number is used verbatim — it is the key the canvas Image
+    # API URL carries too. This test used to expect [0, 3], normalising
+    # usemap to "0-based"; that renormalisation is exactly what put
+    # DjVu-sourced books one page out against their images.
+    assert [leaf for leaf, _ in pages] == [1, 4]
 
 
 def test_djvu_leaf_falls_back_to_position_without_usemap():
@@ -2327,3 +2330,200 @@ def test_hocr_populates_avg_font_size():
     # Median, not mean: the 40pt drop cap must not drag the body block up
     assert body.avg_font_size == 9.0
     assert head.avg_font_size > body.avg_font_size
+
+
+def _ia_canvas(i, filenum):
+    from iiif_utils.core.manifest import Canvas
+    return Canvas(index=i, canvas_id=f"c{i}", label=None, image_id=None,
+                   image_service_url=f"https://iiif.archive.org/image/iiif/3/"
+                                      f"x%2Fx_jp2%2Fx_{filenum:04d}.jp2",
+                   image_api_version="3", width=1, height=1,
+                   alto_url=None, text_url=None, hocr_url=None)
+
+
+def _hocr_page(page_id, image, word):
+    img = f"image {image}; " if image else ""
+    return (f'<div class="ocr_page" id="{page_id}" '
+            f'title="{img}bbox 0 0 100 100">'
+            f'<p class="ocr_par" title="bbox 0 0 9 9">'
+            f'<span class="ocr_line" title="bbox 0 0 9 9">'
+            f'<span class="ocrx_word" title="bbox 0 0 9 9">{word}</span>'
+            f'</span></p></div>')
+
+
+def test_page_image_name_reads_the_hocr_source_filename():
+    from iiif_utils.core.hocr import page_image_name
+    assert page_image_name(
+        "ppageno 4; image spyri/00000005.tif; bbox 0 0 1 1"
+    ) == "00000005.tif"
+    assert page_image_name("image 'page1.png'; bbox 0 0 1 1") == "page1.png"
+    assert page_image_name('image "x_jp2/x_0041.jp2"; bbox') == "x_0041.jp2"
+    assert page_image_name("bbox 0 0 100 100") is None
+    assert page_image_name("") is None
+
+
+def test_ocr_joins_to_canvases_by_scan_filename_not_page_id(
+        monkeypatch, tmp_path):
+    """The v0.2.0 regression: hOCR page id != scan file number, per item.
+
+    Verified against page images — Gray 1918 has id == file number,
+    anatomicaltermin00barkuoft has id == file - 1. Neither arithmetic
+    rule works for both, but both hOCRs name the file they describe.
+    Here ids trail the file number by one; only the filename join
+    puts the text on the right canvas.
+    """
+    from iiif_utils.commands import create_index as ci
+    from iiif_utils.utils.logger import Logger
+
+    hocr = ("<html><body>"
+            + _hocr_page("page_40", "x_jp2/x_0041.jp2", "SEVENTEEN")
+            + _hocr_page("page_41", "x_jp2/x_0042.jp2", "EIGHTEEN")
+            + "</body></html>").encode()
+    monkeypatch.setattr(ci.http_, "fetch_bytes", lambda url, **kw: hocr)
+
+    canvases = [_ia_canvas(0, 41), _ia_canvas(1, 42)]
+    out = ci._parse_monolithic_ocr(
+        {"ia_hocr_url": "https://x/h.html"}, canvases,
+        cfg_http={}, cache_dir=tmp_path, log=Logger(verbose=False))
+    assert out is not None
+    tb_rows, _dims, _src, _pw, _lm = out
+    assert {r["page_id"]: r["text"] for r in tb_rows} == {
+        0: "SEVENTEEN", 1: "EIGHTEEN"}
+    assert ci._ALIGN["join"] == "image_filename"
+
+
+def test_ocr_falls_back_to_file_number_when_hocr_names_no_image(
+        monkeypatch, tmp_path):
+    """No `image` in the title — use the canvas URL's file number."""
+    from iiif_utils.commands import create_index as ci
+    from iiif_utils.utils.logger import Logger
+
+    hocr = ("<html><body>"
+            + _hocr_page("page_41", None, "FORTYONE")
+            + _hocr_page("page_42", None, "FORTYTWO")
+            + "</body></html>").encode()
+    monkeypatch.setattr(ci.http_, "fetch_bytes", lambda url, **kw: hocr)
+
+    canvases = [_ia_canvas(0, 41), _ia_canvas(1, 42)]
+    out = ci._parse_monolithic_ocr(
+        {"ia_hocr_url": "https://x/h.html"}, canvases,
+        cfg_http={}, cache_dir=tmp_path, log=Logger(verbose=False))
+    assert out is not None
+    tb_rows, _dims, _src, _pw, _lm = out
+    assert {r["page_id"]: r["text"] for r in tb_rows} == {
+        0: "FORTYONE", 1: "FORTYTWO"}
+    assert ci._ALIGN["join"] == "file_number"
+
+
+def test_partial_filename_match_does_not_win(monkeypatch, tmp_path):
+    """A half-matching filename join is worse than none — it would leave
+    the remainder keyed by a different rule inside one index."""
+    from iiif_utils.commands import create_index as ci
+    from iiif_utils.utils.logger import Logger
+
+    hocr = ("<html><body>"
+            + _hocr_page("page_41", "x_jp2/x_0041.jp2", "FORTYONE")
+            + _hocr_page("page_42", "somewhere/else.jp2", "FORTYTWO")
+            + "</body></html>").encode()
+    monkeypatch.setattr(ci.http_, "fetch_bytes", lambda url, **kw: hocr)
+
+    canvases = [_ia_canvas(0, 41), _ia_canvas(1, 42)]
+    out = ci._parse_monolithic_ocr(
+        {"ia_hocr_url": "https://x/h.html"}, canvases,
+        cfg_http={}, cache_dir=tmp_path, log=Logger(verbose=False))
+    assert out is not None
+    tb_rows, _dims, _src, _pw, _lm = out
+    assert ci._ALIGN["join"] == "file_number"
+    assert {r["page_id"]: r["text"] for r in tb_rows} == {
+        0: "FORTYONE", 1: "FORTYTWO"}
+
+
+def test_djvu_leaf_is_the_file_number_not_file_number_minus_one():
+    """`usemap="x_0533.djvu"` is leaf 533, the same key the canvas URL
+    carries. Subtracting 1 put every DjVu book one page out."""
+    from iiif_utils.core.djvu import parse_djvu_multipage
+    from iiif_utils.providers.internet_archive import canvas_leaf_map
+
+    xml = b"""<DjVuXML><BODY>
+    <OBJECT usemap="x_0041.djvu" width="100" height="200"><HIDDENTEXT>
+      <PAGECOLUMN><REGION><PARAGRAPH><LINE>
+        <WORD coords="10,50,40,20" x-confidence="90">FORTYONE</WORD>
+      </LINE></PARAGRAPH></REGION></PAGECOLUMN></HIDDENTEXT></OBJECT>
+    <OBJECT usemap="x_0042.djvu" width="100" height="200"><HIDDENTEXT>
+      <PAGECOLUMN><REGION><PARAGRAPH><LINE>
+        <WORD coords="10,50,40,20" x-confidence="90">FORTYTWO</WORD>
+      </LINE></PARAGRAPH></REGION></PAGECOLUMN></HIDDENTEXT></OBJECT>
+    </BODY></DjVuXML>"""
+    pages = parse_djvu_multipage(xml)
+    assert [leaf for leaf, _ in pages] == [41, 42]
+    # ... and those keys land on the canvases addressing those files.
+    leaf_to_canvas = {leaf: ci_
+                      for ci_, leaf in
+                      canvas_leaf_map([_ia_canvas(0, 41),
+                                        _ia_canvas(1, 42)]).items()}
+    assert [leaf_to_canvas[leaf] for leaf, _ in pages] == [0, 1]
+
+
+def test_canvas_image_names_decodes_the_percent_encoded_zip_path():
+    from iiif_utils.providers.internet_archive import canvas_image_names
+    assert canvas_image_names([_ia_canvas(7, 41)]) == {7: "x_0041.jp2"}
+
+
+def test_filename_join_does_not_rekey_page_numbers(monkeypatch, tmp_path):
+    """Text and printed page numbers live in different leaf domains.
+
+    hOCR ids are 0-based (barkuoft page_000040 == printed '17') while
+    `_page_numbers.json` leafNum is the 1-based scan file number
+    (leafNum 41 == printed '17'). The map returned for page-number
+    rekeying must stay in the file-number domain even when the text was
+    attached by filename — otherwise fixing the text shifts the page
+    numbers by the same one.
+    """
+    from iiif_utils.commands import create_index as ci
+    from iiif_utils.utils.logger import Logger
+
+    hocr = ("<html><body>"
+            + _hocr_page("page_40", "x_jp2/x_0041.jp2", "SEVENTEEN")
+            + _hocr_page("page_41", "x_jp2/x_0042.jp2", "EIGHTEEN")
+            + "</body></html>").encode()
+    monkeypatch.setattr(ci.http_, "fetch_bytes", lambda url, **kw: hocr)
+    monkeypatch.setattr(ci, "_verify_leaf_map",
+                        lambda *a, **kw: None)
+
+    canvases = [_ia_canvas(0, 41), _ia_canvas(1, 42)]
+    out = ci._parse_monolithic_ocr(
+        {"ia_hocr_url": "https://x/h.html"}, canvases,
+        cfg_http={}, cache_dir=tmp_path, log=Logger(verbose=False))
+    assert out is not None
+    tb_rows, _dims, _src, _pw, leaf_map = out
+    assert ci._ALIGN["join"] == "image_filename"
+    assert {r["page_id"]: r["text"] for r in tb_rows} == {
+        0: "SEVENTEEN", 1: "EIGHTEEN"}
+    # ... and the returned map is still file-number keyed.
+    assert leaf_map == {41: 0, 42: 1}
+
+
+def test_filename_join_rejected_when_names_are_not_distinct(
+        monkeypatch, tmp_path):
+    """Gray 1918's hOCR says `image https://archive.org/todo` on every
+    page — a placeholder, not a filename. Many leaves naming one file
+    can never be a valid join."""
+    from iiif_utils.commands import create_index as ci
+    from iiif_utils.utils.logger import Logger
+
+    hocr = ("<html><body>"
+            + _hocr_page("page_41", "https://archive.org/todo", "FORTYONE")
+            + _hocr_page("page_42", "https://archive.org/todo", "FORTYTWO")
+            + "</body></html>").encode()
+    monkeypatch.setattr(ci.http_, "fetch_bytes", lambda url, **kw: hocr)
+    monkeypatch.setattr(ci, "_verify_leaf_map", lambda *a, **kw: None)
+
+    canvases = [_ia_canvas(0, 41), _ia_canvas(1, 42)]
+    out = ci._parse_monolithic_ocr(
+        {"ia_hocr_url": "https://x/h.html"}, canvases,
+        cfg_http={}, cache_dir=tmp_path, log=Logger(verbose=False))
+    assert out is not None
+    tb_rows, _dims, _src, _pw, _lm = out
+    assert ci._ALIGN["join"] == "file_number"
+    assert {r["page_id"]: r["text"] for r in tb_rows} == {
+        0: "FORTYONE", 1: "FORTYTWO"}

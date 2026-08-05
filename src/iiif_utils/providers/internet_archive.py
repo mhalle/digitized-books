@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import re
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from iiif_utils.core import http as http_
 
@@ -213,6 +213,27 @@ def canvas_leaf_map(canvases: list[Any]) -> dict[int, int]:
         m = _LEAF_IN_URL_RE.search(url)
         if m:
             out[c.index] = int(m.group(1))
+    return out
+
+
+def canvas_image_names(canvases: list[Any]) -> dict[int, str]:
+    """Map canvas index -> the scan filename its Image API URL addresses.
+
+    Pairs with `hocr.page_image_name`: both name the same file, so an
+    OCR page can be attached to a canvas by identity rather than by
+    arithmetic on ids, positions or file numbers — none of which hold
+    across items. Verified against page images: Gray 1918 has hOCR
+    id == file number, anatomicaltermin00barkuoft has id == file - 1.
+    """
+    out: dict[int, str] = {}
+    for c in canvases:
+        url = getattr(c, "image_service_url", None)
+        if not url:
+            continue
+        path = unquote(urlparse(url).path)
+        name = path.rstrip("/").rsplit("/", 1)[-1]
+        if name:
+            out[c.index] = name
     return out
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any
@@ -257,8 +258,7 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
     if mono_source:
         # Whole-book OCR file (IA shape) rather than per-canvas seeAlso.
         idx_md["ocr_shape"] = "monolithic"
-        idx_md["leaf_mapping"] = ("ia_file_number" if leaf_to_canvas
-                                   else "identity")
+        idx_md["leaf_mapping"] = _ALIGN.get("join", "none")
         if _FALLBACK.get("from"):
             idx_md["ocr_source_fallback_from"] = _FALLBACK["from"]
             idx_md["ocr_source_fallback_reason"] = _FALLBACK["reason"]
@@ -297,6 +297,7 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
         pn_override = {leaf_to_canvas[leaf]: vals
                        for leaf, vals in pn_override.items()
                        if leaf in leaf_to_canvas}
+    canvas_to_leaf = {ci: leaf for leaf, ci in leaf_to_canvas.items()}
     pn_rows: list[dict[str, Any]] = []
     for c in canvases:
         img_dim = image_dims.get(c.index)
@@ -311,7 +312,9 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
             "book_page_number": (
                 ov.get("book_page_number") if pn_override
                 else db_mod.book_page_from_label(c.label)),
-            "ia_leaf": leaf_to_canvas.get(c.index) if leaf_to_canvas else None,
+            # The provider's own leaf number for this canvas — the inverse
+            # of the leaf->canvas map, not a lookup by canvas index into it.
+            "ia_leaf": canvas_to_leaf.get(c.index),
             "confidence": ov.get("confidence"),
             "pageProb": ov.get("pageProb"),
             "wordConf": ov.get("wordConf"),
@@ -609,6 +612,11 @@ def _fetch_page_number_overrides(
 # construction (one create-index per process).
 _FALLBACK: dict[str, str] = {"from": "", "reason": ""}
 
+# How OCR pages were tied to canvases: image_filename (preferred),
+# file_number (fallback), or identity/none. Recorded in index_metadata so
+# an index says how it was keyed rather than leaving it to be inferred.
+_ALIGN: dict[str, str] = {"join": "none"}
+
 
 def _verify_leaf_map(leaf_to_canvas: dict[int, int],
                       extra_metadata: dict[str, str], *,
@@ -676,6 +684,7 @@ def _parse_monolithic_ocr(
     mono_dir = cache_dir / "monolithic"
     pages: list[tuple[int, Any]] | None = None
     source = ""
+    page_images: dict[int, str] = {}   # leaf -> source image filename
     if hocr_url:
         from iiif_utils.core import hocr as hocr_mod
         log.info(f"fetching monolithic hOCR: {hocr_url}")
@@ -683,7 +692,9 @@ def _parse_monolithic_ocr(
             content = http_.fetch_bytes(hocr_url, cfg_http=cfg_http,
                                           cache_dir=mono_dir,
                                           suffix=".hocr.html")
-            pages = hocr_mod.parse_hocr_multipage(content)
+            triples = hocr_mod.parse_hocr_pages(content)
+            pages = [(leaf, pg) for leaf, _img, pg in triples]
+            page_images = {leaf: img for leaf, img, _pg in triples if img}
             source = "hocr"
         except Exception as e:
             log.warn(f"monolithic hOCR failed ({e}); "
@@ -715,14 +726,54 @@ def _parse_monolithic_ocr(
     # IA keys its OCR by LEAF; canvases are a dense renumbering of only
     # the access-format leaves. Translate here, at the boundary, so
     # everything downstream keeps meaning canvas.
-    leaf_to_canvas = {leaf: ci
-                      for ci, leaf in ia_mod.canvas_leaf_map(canvases).items()}
-    if leaf_to_canvas:
-        _verify_leaf_map(leaf_to_canvas, extra_metadata,
+    # Preferred join: the scan filename. The hOCR page declares the image
+    # it describes and the canvas URL addresses that same file, so this
+    # needs no arithmetic and holds per item. Ids, positions and file
+    # numbers do NOT: verified against page images, Gray 1918 has hOCR
+    # id == file number while anatomicaltermin00barkuoft has id == file-1.
+    # TWO domains, and they are not interchangeable. `_page_numbers.json`
+    # is keyed by IA's leafNum — the scan FILE number (barkuoft: 1..234,
+    # leafNum 41 -> printed '17') — so that map is what leaves this
+    # function. OCR text is keyed by whatever the OCR file itself uses,
+    # which for hOCR is the page id (barkuoft: 0..237, id 40 -> '17').
+    # Conflating them shifts the page numbers by exactly the amount the
+    # filename join just corrected the text by.
+    file_leaf_to_canvas = {leaf: ci
+                           for ci, leaf in
+                           ia_mod.canvas_leaf_map(canvases).items()}
+    text_leaf_to_canvas: dict[int, int] = {}
+    join = "none"
+    if page_images:
+        by_name = {name: ci
+                   for ci, name in ia_mod.canvas_image_names(canvases).items()}
+        matched = {leaf: by_name[img]
+                   for leaf, img in page_images.items() if img in by_name}
+        # Only trust it if it explains essentially every canvas; a partial
+        # match means the two sides name files differently and the
+        # remainder would silently fall back to a different rule.
+        distinct = len(set(matched.values())) == len(matched)
+        if distinct and len(matched) >= math.ceil(0.98 * len(canvases)):
+            text_leaf_to_canvas = matched
+            join = "image_filename"
+            log.info(f"OCR pages joined to canvases by scan filename "
+                     f"({len(matched)}/{len(canvases)})")
+        elif matched:
+            log.warn(f"scan-filename join matched only {len(matched)} of "
+                     f"{len(canvases)} canvases; falling back to the file "
+                     f"number in the canvas URL")
+    if not text_leaf_to_canvas:
+        text_leaf_to_canvas = dict(file_leaf_to_canvas)
+        if text_leaf_to_canvas:
+            join = "file_number"
+    if file_leaf_to_canvas:
+        _verify_leaf_map(file_leaf_to_canvas, extra_metadata,
                           cfg_http=cfg_http, cache_dir=cache_dir, log=log)
     else:
         # Not an IA-shaped item: leaf and canvas coincide by definition.
-        leaf_to_canvas = {c.index: c.index for c in canvases}
+        file_leaf_to_canvas = {c.index: c.index for c in canvases}
+        text_leaf_to_canvas = dict(file_leaf_to_canvas)
+        join = "identity"
+    _ALIGN["join"] = join
 
     tb_rows: list[dict[str, Any]] = []
     il_rows: list[dict[str, Any]] = []  # always empty for hOCR/DjVu
@@ -730,7 +781,7 @@ def _parse_monolithic_ocr(
     image_dims: dict[int, tuple[int, int]] = {}
     dropped = 0
     for leaf, page in pages:
-        canvas = leaf_to_canvas.get(leaf)
+        canvas = text_leaf_to_canvas.get(leaf)
         if canvas is None:
             # A leaf IA excluded from access formats — a scanner colour
             # card, or one the operator marked Delete. It has no canvas,
@@ -744,4 +795,4 @@ def _parse_monolithic_ocr(
         log.info(f"monolithic {source}: {dropped} OCR pages have no canvas "
                  f"(colour cards / leaves IA excluded from access formats)")
     log.info(f"parsed {len(pages) - dropped} pages from monolithic {source}")
-    return tb_rows, image_dims, source, pw_rows, leaf_to_canvas
+    return tb_rows, image_dims, source, pw_rows, file_leaf_to_canvas

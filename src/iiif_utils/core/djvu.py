@@ -73,10 +73,18 @@ def _int_or(value: str | None, default: int = 0) -> int:
 def parse_djvu_multipage(content: bytes) -> list[tuple[int, AltoPage]]:
     """Parse a whole-book `_djvu.xml` into (leaf, AltoPage) pairs.
 
-    Leaf numbers come from each OBJECT's `usemap="{id}_NNNN.djvu"`,
-    which is DjVu's own 1-based leaf-file number, converted to our
-    0-based leaf. Sequence position is the fallback when usemap is
-    absent or unparseable (ia-utils used position unconditionally).
+    Leaf numbers come from each OBJECT's `usemap="{id}_NNNN.djvu"` —
+    the scan FILE number, used verbatim. That is the same key
+    `internet_archive.canvas_leaf_map` reads out of each canvas's Image
+    API URL, so the two join directly.
+
+    An earlier version subtracted 1 here to "convert to a 0-based leaf",
+    which silently put every DjVu-sourced book one page out against its
+    images once the canvas map landed. Do not reintroduce that: the file
+    number is the identifier, not an ordinal to renormalise.
+
+    Sequence position is the fallback when usemap is absent or
+    unparseable (ia-utils used position unconditionally).
 
     **Leaf alignment here is not guaranteed** — see
     `djvu_alignment_warning`. DjVu files can be sparse, and DjVu leaf
@@ -93,7 +101,7 @@ def parse_djvu_multipage(content: bytes) -> list[tuple[int, AltoPage]]:
                                tag="OBJECT")
     for pos, (_event, obj) in enumerate(context):
         m = _USEMAP_RE.search(obj.get("usemap") or "")
-        leaf = int(m.group(1)) - 1 if m else pos
+        leaf = int(m.group(1)) if m else pos
         page_w = _int_or(obj.get("width"))
         page_h = _int_or(obj.get("height"))
 

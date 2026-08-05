@@ -5,6 +5,61 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-08-04
+
+### Fixed
+
+- **IA OCR text was attached to the wrong canvas on some items** — the
+  regression reported against 0.2.0/0.2.1. The leaf→canvas translation
+  added in 0.2.0 derived the leaf from the scan file number in the
+  canvas's Image API URL, then matched it against the hOCR page id.
+  Those two agree on some items and not others, and there is no
+  arithmetic rule covering both: `anatomyofhumanbo1918gray` has
+  `page_000024` ↔ `_0024.jp2`, while `anatomicaltermin00barkuoft` has
+  `page_000040` ↔ `_0041.jp2`. Every book of the second shape had its
+  text one page out.
+
+  The hOCR spec puts the source scan in the `ocr_page` title
+  (`image "…/x_0041.jp2"`), and the canvas's Image API URL addresses
+  that same file — so the two now join on the filename, with no
+  arithmetic and no per-item assumption. Confirmed against the page
+  image: `anatomicaltermin00barkuoft` canvas 40 shows printed page 17,
+  and now carries the text of hOCR page 40 ("PARTS OF THE HUMAN BODY
+  17") instead of page 41's.
+
+  The file-number map remains the fallback for items whose hOCR names
+  no usable image — Gray 1918 writes the placeholder
+  `image https://archive.org/todo` on every page — and is still what
+  that item's alignment is built from. A partial or non-distinct
+  filename match is rejected rather than half-applied.
+  `index_metadata.leaf_mapping` now records which join was used
+  (`image_filename`, `file_number`, or `identity`).
+
+- **DjVu-sourced books were one page out** for the same reason.
+  `parse_djvu_multipage` subtracted 1 from the `usemap` file number to
+  "convert to a 0-based leaf" — but that number is an identifier that
+  joins to the canvas URL, not an ordinal to renormalise. This affected
+  `anatomicalnamese00eycluoft` and `dieanatomischen00hisgoog`, both of
+  which have no hOCR at all.
+
+- **Printed page numbers are keyed in a different domain from OCR
+  text**, and fixing the text alone would have broken them.
+  `_page_numbers.json` `leafNum` is the 1-based scan file number
+  (barkuoft: `leafNum 41` → printed `'17'`) while hOCR ids are 0-based.
+  The two maps are now kept separate; page numbers are rekeyed by file
+  number regardless of how the text was joined.
+
+- `page_numbers.ia_leaf` held a leaf→canvas lookup indexed by canvas,
+  i.e. nothing meaningful. It now holds the canvas's actual IA leaf.
+
+### Note for existing indexes
+
+Any IA index built with 0.2.0 or 0.2.1 may have its text offset against
+its images by one page; DjVu-sourced ones almost certainly do. Rebuild
+IA indexes with `create-index`. Check an existing one with
+`sqlite3 <db> "select value from index_metadata where key='leaf_mapping'"`
+— an index carrying no such row predates this fix.
+
 ## [0.2.1] - 2026-08-04
 
 ### Fixed

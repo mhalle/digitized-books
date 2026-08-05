@@ -47,6 +47,25 @@ _BBOX_RE = re.compile(r"bbox\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)")
 _WCONF_RE = re.compile(r"x_wconf\s+(\d+)")
 _FSIZE_RE = re.compile(r"x_fsize\s+(\d+)")
 _PAGE_ID_RE = re.compile(r"page_0*(\d+)")
+# The hOCR spec puts the SOURCE IMAGE in the ocr_page title:
+#   title="ppageno 4; image spyri_heidi_1880/00000005.tif; bbox 0 0 W H"
+# That names the actual scan file, which is also what a IIIF canvas's
+# Image API URL addresses — so the two join on a filename with no
+# arithmetic and no per-item assumptions. Page ids and positions do NOT
+# reliably equal the file number: verified against images, Gray 1918 has
+# id == file number while anatomicaltermin00barkuoft has id == file - 1.
+_PAGE_IMAGE_RE = re.compile(r"""\bimage\s+["']?([^;"']+)""")
+
+
+def page_image_name(title: str) -> str | None:
+    """Basename of the scan file an ocr_page describes, if it says."""
+    m = _PAGE_IMAGE_RE.search(title or "")
+    if not m:
+        return None
+    raw = m.group(1).strip().rstrip("'\"")
+    if not raw:
+        return None
+    return raw.replace("\\", "/").rsplit("/", 1)[-1]
 
 # Block-level classes per source shape. MDZ per-canvas files use
 # `ocrx_block`; IA's monolithic Tesseract output uses paragraph-level
@@ -219,6 +238,26 @@ def parse_hocr_bytes(content: bytes) -> AltoPage:
     # One canvas per file — only the first page element counts.
     return _page_from_el(pages[0], _BLOCK_CLASSES_SINGLE,
                           keep_confidence=False)
+
+
+def parse_hocr_pages(content: bytes) -> list[tuple[int, str | None, AltoPage]]:
+    """Like `parse_hocr_multipage`, but also returns each page's source
+    image filename when the hOCR declares one.
+
+    The filename is the only identifier that reliably ties an hOCR page
+    to a particular scan: ids and positions have both been observed to
+    disagree with the file number, in opposite directions, on real IA
+    items.
+    """
+    out: list[tuple[int, str | None, AltoPage]] = []
+    for seq, page_el in enumerate(_page_els(content)):
+        title = page_el.get("title") or ""
+        m = _PAGE_ID_RE.search(page_el.get("id") or "")
+        leaf = int(m.group(1)) if m else seq
+        out.append((leaf, page_image_name(title),
+                    _page_from_el(page_el, _BLOCK_CLASSES_TESSERACT,
+                                   keep_confidence=True)))
+    return out
 
 
 def parse_hocr_multipage(content: bytes) -> list[tuple[int, AltoPage]]:
