@@ -63,9 +63,17 @@ def get_page(index: Path, leaf_num: int | None, book: str | None,
     conn = sqlite3.connect(f"file:{index}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     leaf_num = resolve_leaf(conn, leaf_num, book)
+    # `ia_leaf` postdates the first indexes, and plenty are still on
+    # disk. Select it only when it is there rather than making every
+    # older index fail to fetch a page at all.
+    have_ia_leaf = any(
+        r[1] == "ia_leaf"
+        for r in conn.execute("PRAGMA table_info(page_numbers)").fetchall()
+    )
     row = conn.execute(
         "SELECT image_service_url, image_width, image_height, width, height, "
-        "book_page_number FROM page_numbers WHERE leaf_num = ?",
+        "book_page_number" + (", ia_leaf" if have_ia_leaf else "") +
+        " FROM page_numbers WHERE leaf_num = ?",
         (leaf_num,),
     ).fetchone()
     if not row or not row["image_service_url"]:
@@ -93,10 +101,20 @@ def get_page(index: Path, leaf_num: int | None, book: str | None,
             want_w = int(size.split(",")[0])
         elif nat_w:
             want_w = nat_w
+        # BookReader is keyed by IA's LEAF — "a leaf number that
+        # corresponds to an image in the jp2.zip file" — not by the dense
+        # canvas index this index calls `leaf_num`. Passing the canvas
+        # index fetched the wrong page on every item where IA excluded a
+        # leaf from access formats, and did so silently: you get a
+        # perfectly good image of a different page. `ia_leaf` is that
+        # number; when it is NULL the two coincide by definition.
+        br_leaf = (row["ia_leaf"]
+                   if have_ia_leaf and row["ia_leaf"] is not None
+                   else leaf_num)
         ia_fallbacks.append((
             "bookreader",
             ia_mod.bookreader_image_url(
-                ia_ident, leaf_num, ia_mod.bookreader_size_for(want_w))))
+                ia_ident, int(br_leaf), ia_mod.bookreader_size_for(want_w))))
         jp2 = ia_mod.jp2_url_from_service(row["image_service_url"])
         if jp2:
             ia_fallbacks.append(("jp2 (original)", jp2))

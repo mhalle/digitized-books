@@ -198,6 +198,13 @@ Reconstructed output is marked `quotable: false` — it is evidence of
 what is on the page, not a transcription. Never quote it as the
 author's words.
 
+`table` on a page that is *not* tabular is worse than unhelpful: on a
+sequential multi-column list — an index, a glossary, a nomenclature
+list — it will pair up whatever happens to sit side by side and present
+the result as rows, manufacturing relationships between terms that have
+nothing to do with each other. Confirm the page really has columns that
+mean something across a row before reading anything off one.
+
 The mode is always explicit: index default → `--layout` override →
 `--detect`, which only ever *reports* a hint. **The detector is
 uncalibrated**; treat its output as a suggestion to check by eye, not a

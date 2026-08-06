@@ -5,6 +5,39 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2026-08-05
+
+### Fixed
+
+- **`get-page --source bookreader` fetched the wrong page.** It passed
+  the canvas index where IA's BookReader endpoint expects a leaf —
+  documented as "a leaf number that corresponds to an image in the
+  jp2.zip file", i.e. the scan file number. On any item where IA
+  excluded a leaf from access formats the two diverge, and the failure
+  is silent: you get a perfectly good image of a different page. Now
+  keyed off `page_numbers.ia_leaf`, falling back to the canvas index
+  when that is NULL (where the two coincide by definition). Indexes
+  predating the column are detected and still work.
+
+### Added
+
+- **Sequential page labels are detected and flagged.** When
+  `book_page_number` is nothing but `leaf_num` plus a constant across
+  every canvas, it is a scan counter wearing the printed-page column —
+  a real book's unnumbered or roman front matter makes a single
+  constant offset impossible. `create-index` warns and records
+  `book_page_numbers = synthetic` in `index_metadata`, and `-b/--book`
+  warns again at lookup time, which is where the harm actually lands.
+  The numbers are kept, not deleted: they may still be the best
+  ordering available, they just are not what is printed on the page.
+
+### Documentation
+
+- `SKILL.md` now warns that `--layout table` on a sequential
+  multi-column list (an index, a glossary, a nomenclature list)
+  manufactures false adjacencies — it pairs whatever sits side by side
+  and presents it as a row.
+
 ## [0.2.3] - 2026-08-05
 
 ### Added

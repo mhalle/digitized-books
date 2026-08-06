@@ -94,6 +94,17 @@ def page_ref(index: int) -> dict[str, int]:
     return {"leaf": index, "canvas": index}
 
 
+def _synthetic_page_numbers(conn: sqlite3.Connection) -> bool:
+    """Did create-index flag this index's page numbers as a counter?"""
+    try:
+        row = conn.execute(
+            "SELECT value FROM index_metadata WHERE key = 'book_page_numbers'"
+        ).fetchone()
+    except sqlite3.Error:
+        return False
+    return bool(row) and row[0] == "synthetic"
+
+
 def resolve_leaf(conn: sqlite3.Connection,
                   leaf: int | None,
                   book: str | None) -> int:
@@ -124,6 +135,15 @@ def resolve_leaf(conn: sqlite3.Connection,
         raise click.ClickException(
             f"No leaf found for printed page {book!r}."
         )
+    if _synthetic_page_numbers(conn):
+        # The index recorded at build time that these are sequential
+        # labels, not transcriptions. Warn here rather than only at
+        # build time: the damage is done by someone asking for page 100
+        # months later and believing they got what the page says.
+        click.echo(
+            f"WARN: this index's page numbers are sequential labels, not "
+            f"numbers printed on the page — {book!r} resolved by position, "
+            f"not by what the page says.", err=True)
     if len(rows) > 1:
         leaves = ", ".join(str(int(r["leaf_num"])) for r in rows)
         raise click.ClickException(

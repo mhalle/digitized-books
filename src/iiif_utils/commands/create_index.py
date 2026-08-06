@@ -328,6 +328,22 @@ def create_index(ctx: click.Context, ref: str, output_dir: Path,
             "image_width": img_dim[0] if img_dim else None,   # ALTO Page dims
             "image_height": img_dim[1] if img_dim else None,  # = native image
         })
+    if _looks_like_a_counter(pn_rows):
+        # Not printed page numbers at all — a scan counter wearing their
+        # column. A real book's front matter is unnumbered or roman, so
+        # a single constant page-minus-canvas offset holding across
+        # every leaf including the covers is the signature of a label
+        # that was never a page number. Recorded rather than deleted:
+        # the numbers may still be the best ordering available, but
+        # `-b` must not present them as what is printed on the page.
+        log.warn(
+            "page numbers look synthetic: every canvas has the same "
+            "page-minus-canvas offset, which a real book's front matter "
+            "makes impossible. These are almost certainly sequential "
+            "labels, not printed page numbers — `-b/--book` will resolve "
+            "but does not mean the number printed on the page."
+        )
+        db_mod.write_index_metadata(db, {"book_page_numbers": "synthetic"})
     if pn_rows:
         db_mod.write_page_numbers(db, pn_rows)
 
@@ -573,6 +589,29 @@ def _rows_from_page(page_index: int, page: Any, *, default_block_type: str,
             "illustration_type": ill.illustration_type,
             "alto_id": ill.alto_id,
         })
+
+
+def _looks_like_a_counter(pn_rows: list[dict[str, Any]]) -> bool:
+    """True when book_page_number is just leaf_num plus a constant.
+
+    IA's IIIF canvas labels are sequential counters, and any provider
+    whose labels are positions rather than transcriptions produces the
+    same shape. Requires a decent sample: on a ten-page pamphlet a
+    constant offset is unremarkable.
+    """
+    if len(pn_rows) < 20:
+        return False
+    offsets = set()
+    n = 0
+    for r in pn_rows:
+        raw = r.get("book_page_number")
+        if raw is None or not str(raw).strip().lstrip("-").isdigit():
+            continue
+        offsets.add(int(str(raw).strip()) - int(r["leaf_num"]))
+        n += 1
+        if len(offsets) > 1:
+            return False
+    return n >= 0.9 * len(pn_rows) and len(offsets) == 1
 
 
 def _fetch_page_number_overrides(

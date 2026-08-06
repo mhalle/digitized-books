@@ -2608,3 +2608,80 @@ def test_complete_monolithic_ocr_is_not_warned_about(monkeypatch, tmp_path):
     ci._parse_monolithic_ocr({"ia_hocr_url": "https://x/h.html"}, canvases,
                               cfg_http={}, cache_dir=tmp_path, log=log)
     assert not warnings, warnings
+
+
+def test_bookreader_url_uses_the_ia_leaf_not_the_canvas_index():
+    """BookReader's leaf{N} is "a leaf number that corresponds to an image
+    in the jp2.zip file" — the scan file number. Canvas 23 of Gray 1918 is
+    file 24, so a bookreader fetch for it must ask for leaf24."""
+    from iiif_utils.providers.internet_archive import bookreader_image_url
+    assert bookreader_image_url("anatomyofhumanbo1918gray", 24, "large") == (
+        "https://archive.org/download/anatomyofhumanbo1918gray"
+        "/page/leaf24_large.jpg")
+
+
+def test_counter_detection_flags_a_constant_offset():
+    from iiif_utils.commands.create_index import _looks_like_a_counter
+    counter = [{"leaf_num": i, "book_page_number": str(i + 1)}
+               for i in range(40)]
+    assert _looks_like_a_counter(counter)
+
+
+def test_counter_detection_spares_a_real_book():
+    """A real book's front matter breaks the offset — Gray 1918 alone has
+    five distinct leaf-minus-page values."""
+    from iiif_utils.commands.create_index import _looks_like_a_counter
+    real = [{"leaf_num": i, "book_page_number": None} for i in range(6)]
+    real += [{"leaf_num": i, "book_page_number": str(i - 5)}
+             for i in range(6, 30)]
+    real += [{"leaf_num": i, "book_page_number": str(i - 6)}   # a plate
+             for i in range(30, 40)]
+    assert not _looks_like_a_counter(real)
+
+
+def test_counter_detection_needs_a_real_sample():
+    """On a short pamphlet a constant offset means nothing."""
+    from iiif_utils.commands.create_index import _looks_like_a_counter
+    assert not _looks_like_a_counter(
+        [{"leaf_num": i, "book_page_number": str(i + 1)} for i in range(8)])
+
+
+def test_book_lookup_warns_when_page_numbers_are_synthetic(tmp_path):
+    """The harm lands months later, at query time, not at build time."""
+    import sqlite3
+
+    from iiif_utils.utils.page import resolve_leaf
+
+    db = tmp_path / "x.db"
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE page_numbers (leaf_num INT, "
+                  "book_page_number TEXT)")
+    conn.execute("CREATE TABLE index_metadata (key TEXT, value TEXT)")
+    conn.execute("INSERT INTO page_numbers VALUES (99, '100')")
+    conn.execute("INSERT INTO index_metadata VALUES "
+                  "('book_page_numbers', 'synthetic')")
+    conn.commit()
+    conn.row_factory = sqlite3.Row
+
+    runner = CliRunner()
+    with runner.isolation() as (out, err, _):
+        assert resolve_leaf(conn, None, "100") == 99
+        assert "sequential labels" in err.getvalue().decode()
+
+
+def test_book_lookup_is_quiet_on_a_normal_index(tmp_path):
+    import sqlite3
+
+    from iiif_utils.utils.page import resolve_leaf
+
+    conn = sqlite3.connect(tmp_path / "x.db")
+    conn.execute("CREATE TABLE page_numbers (leaf_num INT, "
+                  "book_page_number TEXT)")
+    conn.execute("INSERT INTO page_numbers VALUES (99, '100')")
+    conn.commit()
+    conn.row_factory = sqlite3.Row
+    runner = CliRunner()
+    with runner.isolation() as (out, err, _):
+        # No index_metadata table at all — an older index must not crash.
+        assert resolve_leaf(conn, None, "100") == 99
+        assert err.getvalue() == b""
